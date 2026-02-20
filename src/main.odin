@@ -58,10 +58,10 @@ parse_command :: proc(arg: string) -> Command {
 }
 
 print_usage :: proc() {
-    fmt.println("nullclaw - AI assistant runtime")
+    fmt.println("odin-claw - AI assistant runtime")
     fmt.println("")
     fmt.println("USAGE:")
-    fmt.println("  nullclaw <command> [options]")
+    fmt.println("  odin-claw <command> [options]")
     fmt.println("")
     fmt.println("COMMANDS:")
     fmt.println("  agent       Start the AI agent loop")
@@ -183,7 +183,7 @@ run_channel :: proc(args: []string) {
     defer free_config(&config)
 
     if len(args) == 0 {
-        fmt.println("Usage: nullclaw channel <command>")
+        fmt.println("Usage: odin-claw channel <command>")
         fmt.println("Commands: start, list")
         return
     }
@@ -288,14 +288,14 @@ run_doctor :: proc(args: []string) {
 
     fmt.println("")
     fmt.println("Checking HTTP connectivity...")
-    fmt.println("  [INFO] Run 'nullclaw agent' to test actual connectivity")
+    fmt.println("  [INFO] Run 'odin-claw agent' to test actual connectivity")
 
     fmt.println("")
     if issues == 0 {
         fmt.println("=== All checks passed ===")
     } else {
         fmt.printf("=== %d issue(s) found ===\n", issues)
-        fmt.println("Run 'nullclaw onboard' to configure")
+        fmt.println("Run 'odin-claw onboard' to configure")
     }
 }
 
@@ -355,8 +355,8 @@ run_onboard :: proc(args: []string) {
 
     fmt.println("")
     fmt.println("Configuration complete!")
-    fmt.println("Run 'nullclaw status' to verify")
-    fmt.println("Run 'nullclaw agent' to start")
+    fmt.println("Run 'odin-claw status' to verify")
+    fmt.println("Run 'odin-claw agent' to start")
 }
 
 run_skills :: proc(args: []string) {
@@ -364,7 +364,7 @@ run_skills :: proc(args: []string) {
     fmt.println("")
 
     if len(args) == 0 {
-        fmt.println("Usage: nullclaw skills <command>")
+        fmt.println("Usage: odin-claw skills <command>")
         fmt.println("")
         fmt.println("Commands:")
         fmt.println("  list     List available skills")
@@ -391,7 +391,7 @@ run_hardware :: proc(args: []string) {
     fmt.println("")
 
     if len(args) == 0 {
-        fmt.println("Usage: nullclaw hardware <command>")
+        fmt.println("Usage: odin-claw hardware <command>")
         fmt.println("")
         fmt.println("Commands:")
         fmt.println("  list     List detected hardware")
@@ -415,7 +415,7 @@ run_migrate :: proc(args: []string) {
     fmt.println("")
 
     if len(args) == 0 {
-        fmt.println("Usage: nullclaw migrate <source> [dest]")
+        fmt.println("Usage: odin-claw migrate <source> [dest]")
         fmt.println("")
         fmt.println("Sources:")
         fmt.println("  json     Migrate from JSON snapshot")
@@ -426,7 +426,7 @@ run_migrate :: proc(args: []string) {
     switch args[0] {
     case "json":
         if len(args) < 2 {
-            fmt.println("Usage: nullclaw migrate json <path>")
+            fmt.println("Usage: odin-claw migrate json <path>")
             return
         }
         fmt.printf("Migrating from JSON: %s\n", args[1])
@@ -479,7 +479,7 @@ run_models :: proc(args: []string) {
 
 run_daemon :: proc(args: []string) {
     fmt.println("Daemon mode not yet implemented")
-    fmt.println("Use 'nullclaw gateway' for HTTP server mode")
+    fmt.println("Use 'odin-claw gateway' for HTTP server mode")
 }
 
 run_service :: proc(args: []string) {
@@ -488,7 +488,7 @@ run_service :: proc(args: []string) {
 }
 
 load_or_default_config :: proc() -> Config {
-    config_path := "~/.nullclaw/config.json"
+    config_path := "~/.odin-claw/config.json"
     env_path := os.get_env("NULLCLAW_CONFIG_PATH")
     if env_path != "" {
         config_path = env_path

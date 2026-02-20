@@ -2,7 +2,7 @@
 
 Small enough to run on your coffee maker.
 
-**388 KB binary · ~1 ms startup · 3 tests**
+**388 KB binary · ~0.2 ms startup · 25 tests**
 
 AI assistant runtime written in Odin, inspired by [NullClaw](https://github.com/nullclaw/nullclaw) (Zig).
 
