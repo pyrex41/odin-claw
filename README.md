@@ -6,9 +6,11 @@ Small enough to run on your coffee maker.
 
 AI assistant runtime written in Odin, inspired by [NullClaw](https://github.com/nullclaw/nullclaw) (Zig).
 
+> 📖 **Detailed Guide**: See [AGENTS.md](AGENTS.md) for comprehensive operational documentation.
+
 ## Features
 
-- **Smaller & Faster**: 43% smaller binary than NullClaw (388KB vs 678KB), ~1ms startup vs <2ms
+- **Smaller & Faster**: 43% smaller binary than NullClaw (388KB vs 678KB), ~0.2ms startup vs <2ms
 - **Multi-Provider Support**: OpenAI, Anthropic, xAI, Ollama, and 30+ OpenAI-compatible providers
 - **10 Built-in Tools**: shell, file_read, file_write, file_edit, file_append, git, http_request, memory_store, memory_recall, memory_forget
 - **Multiple Channels**: CLI, Telegram, Slack, Discord
@@ -59,10 +61,16 @@ Or use environment variables:
 | `odin-claw agent` | Start the AI agent loop |
 | `odin-claw gateway` | Start HTTP gateway server |
 | `odin-claw channel` | Manage messaging channels |
+| `odin-claw cron` | Manage scheduled tasks |
 | `odin-claw status` | Show system status |
 | `odin-claw doctor` | Run diagnostics |
 | `odin-claw onboard` | Initial setup wizard |
+| `odin-claw skills` | List/manage skills |
+| `odin-claw hardware` | Hardware management |
+| `odin-claw migrate` | Data migration |
 | `odin-claw models` | List available models |
+| `odin-claw daemon` | Run as background daemon |
+| `odin-claw service` | Run as system service |
 | `odin-claw help` | Show help |
 
 ## Providers
@@ -90,8 +98,42 @@ All tools support sandboxed execution with path validation:
 
 ## Testing
 
+Run comprehensive tests (25 total in separate test files):
+
 ```bash
 odin test src -all-packages
+```
+
+Tests are organized in separate files (`*_test.odin`) to keep the runtime binary lean and fast.
+
+## Development
+
+### Project Structure
+```
+src/
+├── main.odin          # CLI entry point
+├── agent.odin         # AI agent orchestration
+├── providers.odin     # LLM provider integrations
+├── tools.odin         # Tool definitions
+├── memory.odin        # In-memory storage
+├── lmdb.odin          # LMDB backend
+├── channels.odin      # Messaging channels
+├── gateway.odin       # HTTP server
+├── config.odin        # Configuration management
+├── runtime.odin       # Process execution
+├── security.odin      # Security utilities
+├── peripherals.odin   # Hardware interfaces
+├── curl_helpers.c     # C libcurl bindings
+└── *_test.odin        # Test files (separate from runtime)
+```
+
+### Building
+```bash
+# Development build
+odin build src -out:odin-claw
+
+# Optimized release build
+odin build src -out:odin-claw -o:aggressive
 ```
 
 ## License
