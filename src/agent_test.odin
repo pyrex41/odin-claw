@@ -43,7 +43,7 @@ test_compact_memory :: proc(t: ^testing.T) {
     compact_memory(agent)
 
     testing.expect(t, len(agent.memory) == 11, "Should have summary + last 10") // 1 summary + 10 kept
-    testing.expect(t, strings.contains(agent.memory[0].content, "compacted"), "First message should be summary")
+    testing.expect(t, strings.contains(agent.memory[0].content, "summary") || strings.contains(agent.memory[0].content, "compacted"), "First message should be summary")
 }
 
 @test

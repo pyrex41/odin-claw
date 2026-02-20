@@ -110,7 +110,8 @@ handle_pair :: proc(req: Request, gateway: ^Gateway) -> Response {
 }
 
 // Process telegram webhook after 200 already sent to Telegram
-process_telegram_webhook :: proc(req: Request, config: ^Config, provider: Provider) {
+// Uses the Agent with session management, tools, and context-rich system prompt
+process_telegram_webhook :: proc(req: Request, config: ^Config, provider: Provider, tools: []Tool, session_store: ^SessionStore) {
     body := req.body
     chat_id := extract_json_int(body, "chat", "id")
     text := extract_json_string(body, "text")
@@ -121,19 +122,51 @@ process_telegram_webhook :: proc(req: Request, config: ^Config, provider: Provid
 
     fmt.printf("[Telegram] chat_id=%s text=%s\n", chat_id, text)
 
-    // Call the AI provider
-    messages := []Message{
-        {role = "system", content = "You are OdinClaw, a helpful AI assistant. Be concise."},
-        {role = "user", content = text},
-    }
-    fmt.printf("[Telegram] Calling provider: %s\n", provider.vtable.name(provider.ptr))
-    reply_msg, _, err := provider.vtable.chat(provider.ptr, messages, {})
+    // Load or create session for this user
+    session := load_session(session_store, "telegram", chat_id)
 
-    reply_text := reply_msg.content
-    fmt.printf("[Telegram] Provider response: err=%v content_len=%d\n", err, len(reply_text))
+    // Build context-rich system prompt
+    system_prompt := build_system_prompt(tools, "Telegram")
+
+    // Create agent with session history
+    runtime := create_native_runtime()
+    defer runtime.vtable.deinit(&runtime)
+
+    agent := init_agent(config, provider, tools, runtime)
+    defer deinit_agent(agent)
+
+    // Load system prompt as first message
+    append(&agent.memory, Message{role = "system", content = system_prompt})
+
+    // Load session history into agent memory
+    for msg in session.history {
+        append(&agent.memory, Message{role = msg.role, content = msg.content})
+    }
+
+    // Run the agent chat loop (handles tool dispatch)
+    fmt.printf("[Telegram] Running agent with %d history messages, provider: %s\n",
+        len(session.history), provider.vtable.name(provider.ptr))
+    reply_text, err := chat_loop(agent, text, config.agent.max_loop_iterations)
+
+    fmt.printf("[Telegram] Agent response: err=%v content_len=%d\n", err, len(reply_text))
     if err != .None || reply_text == "" {
         reply_text = "Sorry, I couldn't process that request."
     }
+
+    // Update session history from agent memory (skip system prompt)
+    for msg in session.history {
+        delete(msg.role)
+        delete(msg.content)
+    }
+    clear(&session.history)
+    for msg in agent.memory {
+        if msg.role != "system" {
+            append(&session.history, Message{role = strings.clone(msg.role), content = strings.clone(msg.content)})
+        }
+    }
+
+    // Save session back to store
+    save_session(session_store, &session)
 
     // Send reply via Telegram sendMessage API
     token := config.channels.telegram_api_key
@@ -304,6 +337,20 @@ start_gateway :: proc(config: ^Config, host: string, port: int, provider: Provid
     rate_limiter := init_rate_limiter(u32(config.gateway.rate_limit))
     defer deinit_rate_limiter(rate_limiter)
 
+    // Initialize session store using LMDB for persistence
+    session_db_path := config.session.db_path
+    if session_db_path == "" {
+        session_db_path = "/tmp/odin-claw/sessions"
+    }
+    session_mem, session_ok := init_lmdb_memory(session_db_path)
+    if !session_ok {
+        fmt.printf("[Gateway] Warning: LMDB session store failed to init at %s, using in-memory fallback\n", session_db_path)
+        session_mem = init_in_memory()
+    }
+
+    session_store := init_session_store(session_mem, config.session.max_history, i64(config.session.ttl_seconds))
+    defer deinit_session_store(session_store)
+
     gateway := Gateway{
         port = port,
         host = host,
@@ -352,8 +399,8 @@ start_gateway :: proc(config: ^Config, host: string, port: int, provider: Provid
             net.send_tcp(client, transmute([]u8)resp_str)
             net.close(client)
             delete(resp_str)
-            // Now process the message (Telegram already got its 200)
-            process_telegram_webhook(req, config, provider)
+            // Now process the message with full Agent + session support
+            process_telegram_webhook(req, config, provider, tools, session_store)
             continue
         }
 

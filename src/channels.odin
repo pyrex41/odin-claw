@@ -296,7 +296,19 @@ create_channels_from_config :: proc(config: ^Config) -> []Channel {
     if config.channels.discord_token != "" {
         append(&channels, init_discord_channel(config.channels.discord_token, ""))
     }
-    
+
+    if config.channels.irc_server != "" && config.channels.irc_nick != "" && config.channels.irc_channel != "" {
+        append(&channels, init_irc_channel(config.channels.irc_server, config.channels.irc_nick, config.channels.irc_channel, 6667))
+    }
+
+    if config.channels.matrix_homeserver != "" {
+        append(&channels, init_matrix_channel(config.channels.matrix_homeserver, "", ""))
+    }
+
+    if config.channels.email_smtp_host != "" && config.channels.email_from != "" && config.channels.email_to != "" {
+        append(&channels, init_email_channel(config.channels.email_smtp_host, 587, "", "", config.channels.email_from, config.channels.email_to))
+    }
+
     return channels[:]
 }
 
@@ -305,4 +317,229 @@ deinit_channels :: proc(channels: []Channel) {
         deinit_channel(ch)
     }
     delete(channels)
+}
+
+// ---------------------------------------------------------------------------
+// IRC Channel
+// ---------------------------------------------------------------------------
+
+IRCChannel :: struct {
+    server:       string,
+    port:         int,
+    nick:         string,
+    channel_name: string,
+    password:     string,
+}
+
+init_irc_channel :: proc(server: string, nick: string, channel_name: string, port: int) -> Channel {
+    ic := new(IRCChannel)
+    ic.server = server
+    ic.nick = nick
+    ic.channel_name = channel_name
+    ic.port = port
+    return Channel{ptr = ic, vtable = &irc_vtable}
+}
+
+irc_vtable := Channel_VTable{
+    send = irc_send,
+    receive = irc_receive,
+    name = irc_name,
+    is_configured = irc_is_configured,
+    deinit = irc_deinit,
+}
+
+irc_send :: proc(ptr: rawptr, message: string) -> Channel_Error {
+    ic := (^IRCChannel)(ptr)
+    if ic.server == "" || ic.nick == "" || ic.channel_name == "" {
+        return .Not_Configured
+    }
+
+    // Format the IRC PRIVMSG command
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, "PRIVMSG #")
+    strings.write_string(&sb, ic.channel_name)
+    strings.write_string(&sb, " :")
+    strings.write_string(&sb, message)
+    strings.write_string(&sb, "\r\n")
+    irc_line := strings.to_string(sb)
+
+    // Placeholder: log what would be sent via IRC relay
+    fmt.printf("[IRC] Would send to %s:%d as %s -> %s", ic.server, ic.port, ic.nick, irc_line)
+    return .None
+}
+
+irc_receive :: proc(ptr: rawptr) -> (string, Channel_Error) {
+    ic := (^IRCChannel)(ptr)
+    if ic.server == "" || ic.nick == "" {
+        return "", .Not_Configured
+    }
+    return "", .Not_Configured
+}
+
+irc_name :: proc(ptr: rawptr) -> string {
+    return "irc"
+}
+
+irc_is_configured :: proc(ptr: rawptr) -> bool {
+    ic := (^IRCChannel)(ptr)
+    return ic.server != "" && ic.nick != "" && ic.channel_name != ""
+}
+
+irc_deinit :: proc(ptr: rawptr) {
+    free(ptr)
+}
+
+// ---------------------------------------------------------------------------
+// Matrix Channel
+// ---------------------------------------------------------------------------
+
+MatrixChannel :: struct {
+    homeserver:   string,
+    access_token: string,
+    room_id:      string,
+}
+
+init_matrix_channel :: proc(homeserver: string, access_token: string, room_id: string) -> Channel {
+    mc := new(MatrixChannel)
+    mc.homeserver = homeserver
+    mc.access_token = access_token
+    mc.room_id = room_id
+    return Channel{ptr = mc, vtable = &matrix_vtable}
+}
+
+matrix_vtable := Channel_VTable{
+    send = matrix_send,
+    receive = matrix_receive,
+    name = matrix_name,
+    is_configured = matrix_is_configured,
+    deinit = matrix_deinit,
+}
+
+matrix_send :: proc(ptr: rawptr, message: string) -> Channel_Error {
+    mc := (^MatrixChannel)(ptr)
+    if mc.homeserver == "" || mc.access_token == "" || mc.room_id == "" {
+        return .Not_Configured
+    }
+
+    // Use a simple incrementing txn_id placeholder
+    txn_id := "txn_0"
+    url := fmt.tprintf("%s/_matrix/client/r0/rooms/%s/send/m.room.message/%s", mc.homeserver, mc.room_id, txn_id)
+
+    escaped := escape_json_string(message)
+    defer delete(escaped)
+
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, `{"msgtype":"m.text","body":"`)
+    strings.write_string(&sb, escaped)
+    strings.write_string(&sb, `"}`)
+    body := strings.clone(strings.to_string(sb))
+    defer delete(body)
+
+    headers := []string{
+        fmt.tprintf("Authorization: Bearer %s", mc.access_token),
+        "Content-Type: application/json",
+    }
+    resp, err := http_request("PUT", url, body, headers)
+    if err != .None {
+        fmt.printf("[Matrix] Send failed: %v\n", err)
+        return .Send_Failed
+    }
+    defer delete(resp.body)
+
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        fmt.printf("[Matrix] Send failed: status=%d\n", resp.status_code)
+        return .Send_Failed
+    }
+
+    fmt.printf("[Matrix] Message sent (status=%d)\n", resp.status_code)
+    return .None
+}
+
+matrix_receive :: proc(ptr: rawptr) -> (string, Channel_Error) {
+    mc := (^MatrixChannel)(ptr)
+    if mc.homeserver == "" || mc.access_token == "" {
+        return "", .Not_Configured
+    }
+    return "", .Not_Configured
+}
+
+matrix_name :: proc(ptr: rawptr) -> string {
+    return "matrix"
+}
+
+matrix_is_configured :: proc(ptr: rawptr) -> bool {
+    mc := (^MatrixChannel)(ptr)
+    return mc.homeserver != "" && mc.access_token != "" && mc.room_id != ""
+}
+
+matrix_deinit :: proc(ptr: rawptr) {
+    free(ptr)
+}
+
+// ---------------------------------------------------------------------------
+// Email Channel
+// ---------------------------------------------------------------------------
+
+EmailChannel :: struct {
+    smtp_host: string,
+    smtp_port: int,
+    username:  string,
+    password:  string,
+    from_addr: string,
+    to_addr:   string,
+}
+
+init_email_channel :: proc(smtp_host: string, smtp_port: int, username: string, password: string, from_addr: string, to_addr: string) -> Channel {
+    ec := new(EmailChannel)
+    ec.smtp_host = smtp_host
+    ec.smtp_port = smtp_port
+    ec.username = username
+    ec.password = password
+    ec.from_addr = from_addr
+    ec.to_addr = to_addr
+    return Channel{ptr = ec, vtable = &email_vtable}
+}
+
+email_vtable := Channel_VTable{
+    send = email_send,
+    receive = email_receive,
+    name = email_name,
+    is_configured = email_is_configured,
+    deinit = email_deinit,
+}
+
+email_send :: proc(ptr: rawptr, message: string) -> Channel_Error {
+    ec := (^EmailChannel)(ptr)
+    if ec.smtp_host == "" || ec.from_addr == "" || ec.to_addr == "" {
+        return .Not_Configured
+    }
+
+    // Placeholder: log the email parameters (real SMTP would need raw TCP)
+    fmt.printf("[Email] Would send via %s:%d\n", ec.smtp_host, ec.smtp_port)
+    fmt.printf("[Email] From: %s  To: %s\n", ec.from_addr, ec.to_addr)
+    fmt.printf("[Email] Body: %s\n", message)
+    return .None
+}
+
+email_receive :: proc(ptr: rawptr) -> (string, Channel_Error) {
+    ec := (^EmailChannel)(ptr)
+    if ec.smtp_host == "" {
+        return "", .Not_Configured
+    }
+    return "", .Not_Configured
+}
+
+email_name :: proc(ptr: rawptr) -> string {
+    return "email"
+}
+
+email_is_configured :: proc(ptr: rawptr) -> bool {
+    ec := (^EmailChannel)(ptr)
+    return ec.smtp_host != "" && ec.from_addr != "" && ec.to_addr != ""
+}
+
+email_deinit :: proc(ptr: rawptr) {
+    free(ptr)
 }

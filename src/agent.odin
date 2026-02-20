@@ -68,28 +68,109 @@ deinit_agent :: proc(agent: ^Agent) {
     free(agent)
 }
 
-// compact_memory compacts the agent's memory by summarizing old messages
+// estimate_tokens gives a rough token count (chars / 4)
+estimate_tokens :: proc(messages: [dynamic]Message) -> int {
+    total := 0
+    for msg in messages {
+        total += len(msg.content) / 4 + 4 // +4 for role/framing overhead
+    }
+    return total
+}
+
+// MAX_CONTEXT_TOKENS is a conservative limit to avoid exceeding provider context windows
+MAX_CONTEXT_TOKENS :: 12000
+
+// compact_memory progressively compresses conversation history
+// Strategy:
+//   1. If under threshold, do nothing
+//   2. First pass: truncate long tool results (>500 chars) to summaries
+//   3. If still over limit: drop old tool result messages entirely
+//   4. If still over limit: summarize old conversation into a system message
 compact_memory :: proc(agent: ^Agent) {
     if len(agent.memory) < agent.compaction_threshold {
-        return
+        // Also check estimated token count
+        if estimate_tokens(agent.memory) < MAX_CONTEXT_TOKENS {
+            return
+        }
     }
 
-    // Simple compaction: keep last 10 messages, summarize the rest
     keep_count := 10
     if len(agent.memory) <= keep_count {
         return
     }
 
-    summary := Message{
-        role = "system",
-        content = fmt.tprintf("Conversation summary: %d messages compacted", len(agent.memory) - keep_count),
+    // Pass 1: Truncate long tool results
+    for i := 0; i < len(agent.memory); i += 1 {
+        msg := &agent.memory[i]
+        if msg.role == "tool" && len(msg.content) > 500 {
+            truncated := strings.clone(msg.content[:500])
+            delete(msg.content)
+            msg.content = fmt.tprintf("%s\n[...truncated %d chars]", truncated, len(msg.content) - 500)
+            delete(truncated)
+        }
     }
 
-    new_memory := make([dynamic]Message, 0, 1 + keep_count)
-    append(&new_memory, summary)
-    append(&new_memory, ..agent.memory[len(agent.memory)-keep_count:])
+    // If tokens are low AND we're not over the compaction threshold, stop here
+    if estimate_tokens(agent.memory) < MAX_CONTEXT_TOKENS && len(agent.memory) < agent.compaction_threshold {
+        return
+    }
+
+    // Pass 2: Drop old tool messages (keep recent ones)
+    new_memory := make([dynamic]Message, 0, len(agent.memory))
+    tool_drop_boundary := len(agent.memory) - keep_count
+    for i := 0; i < len(agent.memory); i += 1 {
+        msg := agent.memory[i]
+        // Drop tool messages from old part of conversation
+        if i < tool_drop_boundary && msg.role == "tool" {
+            continue
+        }
+        append(&new_memory, msg)
+    }
     delete(agent.memory)
     agent.memory = new_memory
+
+    if estimate_tokens(agent.memory) < MAX_CONTEXT_TOKENS && len(agent.memory) < agent.compaction_threshold {
+        return
+    }
+
+    // Pass 3: Build a summary of the old messages, keep recent ones
+    old_count := len(agent.memory) - keep_count
+    if old_count <= 0 {
+        return
+    }
+
+    // Build summary text from old messages
+    summary_sb := strings.builder_make()
+    defer strings.builder_destroy(&summary_sb)
+    strings.write_string(&summary_sb, "Previous conversation summary:\n")
+
+    for i := 0; i < old_count; i += 1 {
+        msg := agent.memory[i]
+        if msg.role == "system" {
+            continue // Don't include system prompts in summary
+        }
+        // Brief representation of each message
+        content_preview := msg.content
+        if len(content_preview) > 100 {
+            content_preview = msg.content[:100]
+        }
+        strings.write_string(&summary_sb, fmt.tprintf("- [%s]: %s\n", msg.role, content_preview))
+    }
+
+    summary := Message{
+        role    = "system",
+        content = strings.clone(strings.to_string(summary_sb)),
+    }
+
+    final_memory := make([dynamic]Message, 0, 1 + keep_count)
+    // Keep the original system prompt if present
+    if len(agent.memory) > 0 && agent.memory[0].role == "system" {
+        append(&final_memory, agent.memory[0])
+    }
+    append(&final_memory, summary)
+    append(&final_memory, ..agent.memory[old_count:])
+    delete(agent.memory)
+    agent.memory = final_memory
 }
 
 // dispatch_tool executes a tool call
@@ -192,8 +273,13 @@ mock_tool_description :: proc(ptr: rawptr) -> string {
     return "Mock tool"
 }
 
+mock_tool_schema :: proc(ptr: rawptr) -> string {
+    return `{"type":"object","properties":{}}`
+}
+
 mock_tool_vtable := Tool_VTable{
-    execute = mock_tool_execute,
-    name = mock_tool_name,
+    execute     = mock_tool_execute,
+    name        = mock_tool_name,
     description = mock_tool_description,
+    schema      = mock_tool_schema,
 }

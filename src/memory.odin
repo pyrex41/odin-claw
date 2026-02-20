@@ -98,55 +98,5 @@ in_memory_search :: proc(ptr: rawptr, query: string) -> []string {
     return results[:]
 }
 
-// Placeholder for Embedding
-Embedding :: struct {
-    // Placeholder fields
-    placeholder: int,
-}
-
-init_embedding :: proc() -> ^Embedding {
-    // Placeholder implementation
-    return new(Embedding)
-}
-
-deinit_embedding :: proc(emb: ^Embedding) {
-    free(emb)
-}
-
-embed_text :: proc(emb: ^Embedding, text: string) -> []f32 {
-    // Placeholder: return empty slice
-    return nil
-}
-
-// Placeholder for SQLite
-SQLiteMemory :: struct {
-    // Placeholder fields
-    db_path: string,
-}
-
-init_sqlite :: proc(db_path: string) -> ^SQLiteMemory {
-    mem := new(SQLiteMemory)
-    mem.db_path = strings.clone(db_path)
-    return mem
-}
-
-deinit_sqlite :: proc(mem: ^SQLiteMemory) {
-    delete(mem.db_path)
-    free(mem)
-}
-
-store_sqlite :: proc(mem: ^SQLiteMemory, key: string, data: []byte) -> Memory_Error {
-    // Placeholder: not implemented
-    return .Not_Implemented
-}
-
-retrieve_sqlite :: proc(mem: ^SQLiteMemory, key: string) -> ([]byte, Memory_Error) {
-    // Placeholder: not implemented
-    return nil, .Not_Implemented
-}
-
-search_sqlite :: proc(mem: ^SQLiteMemory, query: string) -> []string {
-    // Placeholder: not implemented
-    return nil
-}
+// Knowledge store, embeddings, and message storage are implemented in memory_db.odin (LMDB-backed)
 

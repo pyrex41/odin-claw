@@ -1,5 +1,7 @@
 package main
 
+import crypto "core:crypto"
+import "core:crypto/chacha20poly1305"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -95,17 +97,109 @@ Secret :: struct {
 }
 
 encrypt_secret :: proc(plaintext: string, key: []byte) -> (Secret, Secret_Error) {
-    // ChaCha20-Poly1305 encryption
-    // In full implementation, use crypto package
+    if len(key) != chacha20poly1305.KEY_SIZE {
+        return Secret{}, .Encryption_Failed
+    }
+
+    plaintext_bytes := transmute([]u8)plaintext
+
+    // Initialize ChaCha20-Poly1305 context
+    ctx: chacha20poly1305.Context
+    chacha20poly1305.init(&ctx, key)
+    defer chacha20poly1305.reset(&ctx)
+
+    // Generate a cryptographically random nonce
+    nonce: [chacha20poly1305.IV_SIZE]u8
+    crypto.rand_bytes(nonce[:])
+
+    // Output: nonce + ciphertext + tag
+    output_len := chacha20poly1305.IV_SIZE + len(plaintext) + chacha20poly1305.TAG_SIZE
+    output := make([]byte, output_len)
+
+    // Copy nonce to output
+    copy(output[:chacha20poly1305.IV_SIZE], nonce[:])
+
+    // Encrypt: seal(ctx, dst, tag, iv, aad, plaintext)
+    ciphertext := output[chacha20poly1305.IV_SIZE:chacha20poly1305.IV_SIZE + len(plaintext)]
+    tag := output[chacha20poly1305.IV_SIZE + len(plaintext):]
+
+    chacha20poly1305.seal(&ctx, ciphertext, tag, nonce[:], nil, plaintext_bytes)
+
     s: Secret
-    s.key = "default"
-    s.value = make([]byte, len(plaintext))
-    copy(s.value, plaintext)
+    s.key = "encrypted"
+    s.value = output
     return s, .None
 }
 
 decrypt_secret :: proc(secret: Secret, key: []byte) -> (string, Secret_Error) {
-    return string(secret.value), .None
+    if len(key) != chacha20poly1305.KEY_SIZE {
+        return "", .Decryption_Failed
+    }
+    if len(secret.value) < chacha20poly1305.IV_SIZE + chacha20poly1305.TAG_SIZE {
+        return "", .Decryption_Failed
+    }
+
+    // Extract nonce, ciphertext, and tag
+    nonce := secret.value[:chacha20poly1305.IV_SIZE]
+    ciphertext_len := len(secret.value) - chacha20poly1305.IV_SIZE - chacha20poly1305.TAG_SIZE
+    ciphertext := secret.value[chacha20poly1305.IV_SIZE:chacha20poly1305.IV_SIZE + ciphertext_len]
+    tag := secret.value[chacha20poly1305.IV_SIZE + ciphertext_len:]
+
+    // Initialize ChaCha20-Poly1305 context
+    ctx: chacha20poly1305.Context
+    chacha20poly1305.init(&ctx, key)
+    defer chacha20poly1305.reset(&ctx)
+
+    // Decrypt: open(ctx, dst, iv, aad, ciphertext, tag) -> bool
+    plaintext := make([]byte, ciphertext_len)
+    ok := chacha20poly1305.open(&ctx, plaintext, nonce, nil, ciphertext, tag)
+    if !ok {
+        delete(plaintext)
+        return "", .Decryption_Failed
+    }
+
+    return string(plaintext), .None
+}
+
+// is_private_ip checks if a hostname resolves to a private IP range (SSRF protection)
+is_private_ip :: proc(host: string) -> bool {
+    // Block common private/reserved ranges
+    private_prefixes := []string{
+        "10.", "172.16.", "172.17.", "172.18.", "172.19.",
+        "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+        "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
+        "172.30.", "172.31.", "192.168.", "127.", "0.",
+        "169.254.", "::1", "fc00:", "fd00:", "fe80:",
+    }
+    for prefix in private_prefixes {
+        if strings.has_prefix(host, prefix) {
+            return true
+        }
+    }
+    // Block localhost aliases
+    if host == "localhost" || host == "0.0.0.0" {
+        return true
+    }
+    return false
+}
+
+// validate_url_for_ssrf checks if a URL is safe to fetch (not pointing to internal resources)
+validate_url_for_ssrf :: proc(url: string) -> bool {
+    // Extract host from URL
+    host := url
+    if idx := strings.index(url, "://"); idx >= 0 {
+        host = url[idx + 3:]
+    }
+    // Remove path
+    if idx := strings.index(host, "/"); idx >= 0 {
+        host = host[:idx]
+    }
+    // Remove port
+    if idx := strings.index(host, ":"); idx >= 0 {
+        host = host[:idx]
+    }
+
+    return !is_private_ip(host)
 }
 
 AuditEntry :: struct {

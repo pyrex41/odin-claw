@@ -210,8 +210,55 @@ run_channel :: proc(args: []string) {
 }
 
 run_cron :: proc(args: []string) {
-    fmt.println("Cron scheduler not yet implemented")
-    fmt.println("Use the agent loop for scheduled tasks")
+    config := load_or_default_config()
+    defer free_config(&config)
+
+    if len(args) == 0 {
+        fmt.println("Usage: odin-claw cron <command>")
+        fmt.println("Commands: list, add, remove, start")
+        return
+    }
+
+    cs := init_cron_scheduler()
+    defer deinit_cron_scheduler(cs)
+
+    switch args[0] {
+    case "list":
+        jobs := list_cron_jobs(cs)
+        if len(jobs) == 0 {
+            fmt.println("No cron jobs configured")
+        } else {
+            for job in jobs {
+                fmt.printf("  [%s] %s schedule=%s enabled=%s\n",
+                    job.id, job.name, job.schedule, job.enabled ? "yes" : "no")
+            }
+        }
+    case "add":
+        if len(args) < 4 {
+            fmt.println("Usage: odin-claw cron add <name> <schedule> <command>")
+            fmt.println("Example: odin-claw cron add daily-check \"0 9 * * *\" \"check system status\"")
+            return
+        }
+        id := add_cron_job(cs, args[1], args[2], args[3])
+        if id != "" {
+            fmt.printf("Added job %s\n", id)
+            delete(id)
+        }
+    case "remove":
+        if len(args) < 2 {
+            fmt.println("Usage: odin-claw cron remove <id>")
+            return
+        }
+        if remove_cron_job(cs, args[1]) {
+            fmt.printf("Removed job %s\n", args[1])
+        } else {
+            fmt.printf("Job %s not found\n", args[1])
+        }
+    case "start":
+        fmt.println("Use 'odin-claw daemon' to start the cron scheduler as part of the daemon")
+    case:
+        fmt.printf("Unknown cron command: %s\n", args[0])
+    }
 }
 
 run_status :: proc(args: []string) {
@@ -418,8 +465,7 @@ run_migrate :: proc(args: []string) {
         fmt.println("Usage: odin-claw migrate <source> [dest]")
         fmt.println("")
         fmt.println("Sources:")
-        fmt.println("  json     Migrate from JSON snapshot")
-        fmt.println("  sqlite   Migrate from SQLite database")
+        fmt.println("  json     Migrate from JSON snapshot into LMDB")
         return
     }
 
@@ -431,8 +477,6 @@ run_migrate :: proc(args: []string) {
         }
         fmt.printf("Migrating from JSON: %s\n", args[1])
         fmt.println("  (requires LMDB backend)")
-    case "sqlite":
-        fmt.println("SQLite migration not available (using LMDB)")
     case:
         fmt.printf("Unknown source: %s\n", args[0])
     }
@@ -478,8 +522,22 @@ run_models :: proc(args: []string) {
 }
 
 run_daemon :: proc(args: []string) {
-    fmt.println("Daemon mode not yet implemented")
-    fmt.println("Use 'odin-claw gateway' for HTTP server mode")
+    dc := DaemonConfig{
+        pid_file = "/tmp/odin-claw.pid",
+        log_file = "/tmp/odin-claw.log",
+        work_dir = "/tmp",
+    }
+
+    if is_daemon_running(dc.pid_file) {
+        fmt.printf("[daemon] Already running (PID file: %s)\n", dc.pid_file)
+        return
+    }
+
+    d := init_daemon(dc)
+    defer deinit_daemon(d)
+
+    start_daemon(d)
+    daemon_main_loop(d)
 }
 
 run_service :: proc(args: []string) {
@@ -531,6 +589,12 @@ create_provider_from_config :: proc(config: ^Config) -> Provider {
             model = "claude-sonnet-4-20250514"
         }
         return init_anthropic_provider(config.providers.anthropic_api_key, model)
+    } else if (prov == "gemini" || prov == "google") && config.providers.gemini_key != "" {
+        model := config.providers.default_model
+        if model == "" {
+            model = "gemini-2.0-flash"
+        }
+        return init_gemini_provider(config.providers.gemini_key, model)
     } else if prov == "ollama" {
         endpoint := config.providers.ollama_endpoint
         if endpoint == "" {

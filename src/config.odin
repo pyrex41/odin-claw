@@ -80,6 +80,19 @@ ChannelsConfig :: struct {
     whatsapp_api_key: string,
     allowlist: []string, // user IDs
     rate_limit: int,
+    irc_server: string,
+    irc_nick: string,
+    irc_channel: string,
+    email_smtp_host: string,
+    email_from: string,
+    email_to: string,
+}
+
+// SessionConfig holds configuration for session management
+SessionConfig :: struct {
+    db_path:     string, // LMDB path for session storage
+    ttl_seconds: int,    // Session TTL (default 86400 = 24h)
+    max_history: int,    // Max messages per session (default 50)
 }
 
 // ProvidersConfig holds configuration for AI model providers
@@ -90,6 +103,7 @@ ProvidersConfig :: struct {
     ollama_endpoint:  string,
     gemini_key:       string,
     compatible_key:   string, // For OpenAI-compatible providers (Groq, DeepSeek, etc.)
+    search_api_key:   string, // Brave Search API key
     default_provider: string,
     default_model:    string,
     retry_attempts:   int,
@@ -107,6 +121,8 @@ Config :: struct {
     memory: MemoryConfig,
     channels: ChannelsConfig,
     providers: ProvidersConfig,
+    session: SessionConfig,
+    search_api_key: string, // Brave Search API key
 }
 
 // load_from_json loads configuration from a JSON file
@@ -162,11 +178,17 @@ apply_env_overrides :: proc(config: ^Config) {
     if xai_key := os.get_env("XAI_API_KEY"); xai_key != "" {
         config.providers.xai_api_key = xai_key
     }
+    if gemini_key := os.get_env("GEMINI_API_KEY"); gemini_key != "" {
+        config.providers.gemini_key = gemini_key
+    }
     if default_provider := os.get_env("ODINCLAW_DEFAULT_PROVIDER"); default_provider != "" {
         config.providers.default_provider = default_provider
     }
     if default_model := os.get_env("ODINCLAW_DEFAULT_MODEL"); default_model != "" {
         config.providers.default_model = default_model
+    }
+    if gemini_key := os.get_env("GEMINI_API_KEY"); gemini_key != "" {
+        config.providers.gemini_key = gemini_key
     }
 
     // Channels
@@ -178,6 +200,16 @@ apply_env_overrides :: proc(config: ^Config) {
     }
     if slack_webhook := os.get_env("SLACK_WEBHOOK_URL"); slack_webhook != "" {
         config.channels.slack_webhook_url = slack_webhook
+    }
+
+    // Session
+    if session_db := os.get_env("ODINCLAW_SESSION_DB"); session_db != "" {
+        config.session.db_path = session_db
+    }
+
+    // Search
+    if search_key := os.get_env("BRAVE_SEARCH_API_KEY"); search_key != "" {
+        config.providers.search_api_key = search_key
     }
 }
 
@@ -232,7 +264,7 @@ default_config :: proc() -> Config {
             embedding_provider = "openai",
             api_key = "",
             hygiene_interval = 3600,
-            backend = "sqlite",
+            backend = "lmdb",
             snapshot_path = "/var/lib/nullclaw/snapshots",
         },
         channels = {
@@ -254,6 +286,11 @@ default_config :: proc() -> Config {
             default_model = "gpt-4o",
             retry_attempts = 3,
             streaming_enabled = true,
+        },
+        session = {
+            db_path = "/tmp/odin-claw/sessions",
+            ttl_seconds = 86400,
+            max_history = 50,
         },
     }
 }
