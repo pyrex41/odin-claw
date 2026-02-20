@@ -2,7 +2,7 @@
 
 Small enough to run on your coffee maker.
 
-**388 KB binary · ~0.2 ms startup · 25 tests**
+**406 KB binary · 2.7s build · 5.4 MB Docker image**
 
 AI assistant runtime written in Odin, inspired by [NullClaw](https://github.com/nullclaw/nullclaw) (Zig).
 
@@ -10,7 +10,7 @@ AI assistant runtime written in Odin, inspired by [NullClaw](https://github.com/
 
 ## Features
 
-- **Smaller & Faster**: 43% smaller binary than NullClaw (388KB vs 678KB), ~0.2ms startup vs <2ms
+- **Tiny**: 406 KB binary, 5.4 MB Docker image, 2.7s build on Apple Silicon
 - **Multi-Provider Support**: OpenAI, Anthropic, xAI, Ollama, and 30+ OpenAI-compatible providers
 - **10 Built-in Tools**: shell, file_read, file_write, file_edit, file_append, git, http_request, memory_store, memory_recall, memory_forget
 - **Multiple Channels**: CLI, Telegram, Slack, Discord
