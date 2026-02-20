@@ -1,1 +1,0 @@
-Read the specs in specs/* and create a plan in IMPLEMENTATION_PLAN.md with tasks to port NullClaw to Odin.
