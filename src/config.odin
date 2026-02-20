@@ -138,27 +138,47 @@ load_from_json :: proc(path: string) -> (config: Config, ok: bool) {
 // apply_env_overrides applies environment variable overrides to the config
 apply_env_overrides :: proc(config: ^Config) {
     // Gateway overrides
-    if port_str := os.get_env("NULLCLAW_GATEWAY_PORT"); port_str != "" {
+    if port_str := os.get_env("ODINCLAW_GATEWAY_PORT"); port_str != "" {
         if port, ok := strconv.parse_int(port_str); ok {
             config.gateway.port = port
         }
     }
-    if host := os.get_env("NULLCLAW_GATEWAY_HOST"); host != "" {
+    if host := os.get_env("ODINCLAW_GATEWAY_HOST"); host != "" {
         config.gateway.host = host
     }
-    // Add more overrides as needed for other fields
-    // For simplicity, only showing a few; in full impl, add all
 
-    // Security overrides (careful with secrets)
-    if secret_key := os.get_env("NULLCLAW_SECURITY_SECRET_KEY"); secret_key != "" {
+    // Security
+    if secret_key := os.get_env("ODINCLAW_SECRET_KEY"); secret_key != "" {
         config.security.secret_key = secret_key
     }
 
-    // Providers
-    if openai_key := os.get_env("NULLCLAW_PROVIDERS_OPENAI_API_KEY"); openai_key != "" {
+    // Providers - standard env vars
+    if openai_key := os.get_env("OPENAI_API_KEY"); openai_key != "" {
         config.providers.openai_api_key = openai_key
     }
-    // Add others similarly
+    if anthropic_key := os.get_env("ANTHROPIC_API_KEY"); anthropic_key != "" {
+        config.providers.anthropic_api_key = anthropic_key
+    }
+    if xai_key := os.get_env("XAI_API_KEY"); xai_key != "" {
+        config.providers.xai_api_key = xai_key
+    }
+    if default_provider := os.get_env("ODINCLAW_DEFAULT_PROVIDER"); default_provider != "" {
+        config.providers.default_provider = default_provider
+    }
+    if default_model := os.get_env("ODINCLAW_DEFAULT_MODEL"); default_model != "" {
+        config.providers.default_model = default_model
+    }
+
+    // Channels
+    if telegram_key := os.get_env("TELEGRAM_API_KEY"); telegram_key != "" {
+        config.channels.telegram_api_key = telegram_key
+    }
+    if discord_token := os.get_env("DISCORD_TOKEN"); discord_token != "" {
+        config.channels.discord_token = discord_token
+    }
+    if slack_webhook := os.get_env("SLACK_WEBHOOK_URL"); slack_webhook != "" {
+        config.channels.slack_webhook_url = slack_webhook
+    }
 }
 
 // default_config returns a Config with default values

@@ -78,8 +78,32 @@ slack_send :: proc(ptr: rawptr, message: string) -> Channel_Error {
     if sc.webhook_url == "" {
         return .Not_Configured
     }
-    
-    fmt.printf("[Slack] Sending message: %s\n", message)
+
+    escaped := escape_json_string(message)
+    defer delete(escaped)
+
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, `{"text":"`)
+    strings.write_string(&sb, escaped)
+    strings.write_string(&sb, `"}`)
+    body := strings.clone(strings.to_string(sb))
+    defer delete(body)
+
+    headers := []string{"Content-Type: application/json"}
+    resp, err := http_post_request(sc.webhook_url, body, headers)
+    if err != .None {
+        fmt.printf("[Slack] Send failed: %v\n", err)
+        return .Send_Failed
+    }
+    defer delete(resp.body)
+
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        fmt.printf("[Slack] Send failed: status=%d\n", resp.status_code)
+        return .Send_Failed
+    }
+
+    fmt.printf("[Slack] Message sent (status=%d)\n", resp.status_code)
     return .None
 }
 
@@ -108,6 +132,7 @@ slack_deinit :: proc(ptr: rawptr) {
 TelegramChannel :: struct {
     bot_token: string,
     api_url: string,
+    default_chat_id: string,
 }
 
 init_telegram_channel :: proc(bot_token: string) -> Channel {
@@ -130,8 +155,38 @@ telegram_send :: proc(ptr: rawptr, message: string) -> Channel_Error {
     if tc.bot_token == "" {
         return .Not_Configured
     }
-    
-    fmt.printf("[Telegram] Sending message: %s\n", message)
+    if tc.default_chat_id == "" {
+        return .Not_Configured
+    }
+
+    url := fmt.tprintf("https://api.telegram.org/bot%s/sendMessage", tc.bot_token)
+    escaped := escape_json_string(message)
+    defer delete(escaped)
+
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, `{"chat_id":"`)
+    strings.write_string(&sb, tc.default_chat_id)
+    strings.write_string(&sb, `","text":"`)
+    strings.write_string(&sb, escaped)
+    strings.write_string(&sb, `"}`)
+    body := strings.clone(strings.to_string(sb))
+    defer delete(body)
+
+    headers := []string{"Content-Type: application/json"}
+    resp, err := http_post_request(url, body, headers)
+    if err != .None {
+        fmt.printf("[Telegram] Send failed: %v\n", err)
+        return .Send_Failed
+    }
+    defer delete(resp.body)
+
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        fmt.printf("[Telegram] Send failed: status=%d\n", resp.status_code)
+        return .Send_Failed
+    }
+
+    fmt.printf("[Telegram] Message sent (status=%d)\n", resp.status_code)
     return .None
 }
 
@@ -174,11 +229,39 @@ discord_vtable := Channel_VTable{
 
 discord_send :: proc(ptr: rawptr, message: string) -> Channel_Error {
     dc := (^DiscordChannel)(ptr)
-    if dc.bot_token == "" {
+    if dc.bot_token == "" || dc.channel_id == "" {
         return .Not_Configured
     }
-    
-    fmt.printf("[Discord] Sending message: %s\n", message)
+
+    url := fmt.tprintf("https://discord.com/api/v10/channels/%s/messages", dc.channel_id)
+    escaped := escape_json_string(message)
+    defer delete(escaped)
+
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, `{"content":"`)
+    strings.write_string(&sb, escaped)
+    strings.write_string(&sb, `"}`)
+    body := strings.clone(strings.to_string(sb))
+    defer delete(body)
+
+    headers := []string{
+        fmt.tprintf("Authorization: Bot %s", dc.bot_token),
+        "Content-Type: application/json",
+    }
+    resp, err := http_post_request(url, body, headers)
+    if err != .None {
+        fmt.printf("[Discord] Send failed: %v\n", err)
+        return .Send_Failed
+    }
+    defer delete(resp.body)
+
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        fmt.printf("[Discord] Send failed: status=%d\n", resp.status_code)
+        return .Send_Failed
+    }
+
+    fmt.printf("[Discord] Message sent (status=%d)\n", resp.status_code)
     return .None
 }
 

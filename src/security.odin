@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:os"
 import "core:strings"
 
 Sandbox_Error :: enum {
@@ -139,7 +140,15 @@ log_audit :: proc(al: ^AuditLog, action: string, user: string, resource: string,
     entry.resource = resource
     entry.result = result
     append(&al.entries, entry)
-    
-    // In full implementation, write to file
-    fmt.printf("[AUDIT] %s: %s %s -> %s\n", action, user, resource, result)
+
+    line := fmt.tprintf("[AUDIT] %s: %s %s -> %s\n", action, user, resource, result)
+    fmt.print(line)
+
+    if al.file_path != "" {
+        fd, err := os.open(al.file_path, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o644)
+        if err == os.ERROR_NONE {
+            os.write_string(fd, line)
+            os.close(fd)
+        }
+    }
 }

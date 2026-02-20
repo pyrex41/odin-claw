@@ -91,11 +91,17 @@ build_openai_request :: proc(messages: []Message, tools: []Tool, model: string) 
     strings.write_string(&sb, model)
     strings.write_string(&sb, `","messages":[`)
     
+    first := true
     for msg in messages {
+        if !first {
+            strings.write_string(&sb, ",")
+        }
+        first = false
+
         strings.write_string(&sb, `{"role":"`)
         strings.write_string(&sb, msg.role)
         strings.write_string(&sb, `","content":`)
-        
+
         // Escape content
         escaped := escape_json_string(msg.content)
         strings.write_string(&sb, `"`)
@@ -103,10 +109,10 @@ build_openai_request :: proc(messages: []Message, tools: []Tool, model: string) 
         strings.write_string(&sb, `"}`)
         delete(escaped)
     }
-    
+
     strings.write_string(&sb, `],"stream":false}`)
-    
-    return strings.to_string(sb)
+
+    return strings.clone(strings.to_string(sb))
 }
 
 escape_json_string :: proc(s: string) -> string {
@@ -140,10 +146,11 @@ http_post :: proc(url: string, body: string, api_key: string) -> (string, Provid
     if err != .None {
         return "", .Network_Error
     }
+    defer delete(resp.body)
     if resp.status_code < 200 || resp.status_code >= 300 {
         return "", .API_Error
     }
-    return resp.body, .None
+    return strings.clone(resp.body), .None
 }
 
 fast_atoi :: proc(s: string) -> int {
@@ -159,34 +166,44 @@ fast_atoi :: proc(s: string) -> int {
 }
 
 parse_openai_response :: proc(body: string) -> (Message, []ToolCall, AgentError) {
-    // Simple JSON parsing - look for content
-    // In production, use proper JSON parser
-    
     msg := Message{role = "assistant"}
     tool_calls := make([]ToolCall, 0)
-    
-    // Find "content"
-    if content_idx := strings.index(body, `"content"`); content_idx >= 0 {
-        // Find the value after "content":
-        search_start := content_idx + 8
-        if search_start < len(body) {
-            // Skip past : and whitespace
-            for search_start < len(body) && (body[search_start] == ':' || body[search_start] == ' ' || body[search_start] == '\t') {
-                search_start += 1
+
+    // Find standalone "content" key (skip keys like "reasoning_content")
+    content_idx := -1
+    search_pos := 0
+    for {
+        idx := strings.index(body[search_pos:], `"content"`)
+        if idx < 0 { break }
+        actual := search_pos + idx
+        if actual > 0 {
+            prev := body[actual - 1]
+            if (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z') || prev == '_' {
+                search_pos = actual + 9
+                continue
             }
-            if search_start < len(body) && body[search_start] == '"' {
-                search_start += 1
-                end := search_start
-                for end < len(body) && body[end] != '"' {
-                    if body[end] == '\\' && end + 1 < len(body) {
-                        end += 2
-                    } else {
-                        end += 1
-                    }
+        }
+        content_idx = actual
+        break
+    }
+
+    if content_idx >= 0 {
+        search_start := content_idx + 9 // len(`"content"`) = 9
+        for search_start < len(body) && (body[search_start] == ':' || body[search_start] == ' ' || body[search_start] == '\t') {
+            search_start += 1
+        }
+        if search_start < len(body) && body[search_start] == '"' {
+            search_start += 1
+            end := search_start
+            for end < len(body) && body[end] != '"' {
+                if body[end] == '\\' && end + 1 < len(body) {
+                    end += 2
+                } else {
+                    end += 1
                 }
-                if end > search_start {
-                    msg.content = body[search_start:end]
-                }
+            }
+            if end > search_start {
+                msg.content = strings.clone(body[search_start:end])
             }
         }
     }
@@ -329,45 +346,51 @@ build_anthropic_request :: proc(messages: []Message, tools: []Tool, model: strin
     }
     
     strings.write_string(&sb, `],"max_tokens":1024}`)
-    
-    return strings.to_string(sb)
+
+    return strings.clone(strings.to_string(sb))
 }
 
 anthropic_http_post :: proc(url: string, body: string, api_key: string, model: string) -> (string, Provider_Error) {
-    // Stub for now - full implementation needs proper TLS
-    return `{"content":"API integration requires TLS support"}`, .None
+    headers := []string{
+        fmt.tprintf("x-api-key: %s", api_key),
+        "anthropic-version: 2023-06-01",
+        "Content-Type: application/json",
+    }
+    resp, err := http_post_request(url, body, headers)
+    if err != .None {
+        return "", .Network_Error
+    }
+    defer delete(resp.body)
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        return "", .API_Error
+    }
+    return strings.clone(resp.body), .None
 }
 
 parse_anthropic_response :: proc(body: string) -> (Message, []ToolCall, AgentError) {
     msg := Message{role = "assistant"}
     tool_calls := make([]ToolCall, 0)
-    
-    // Find content
-    if content_idx := strings.index(body, `"content"`); content_idx >= 0 {
-        search_start := content_idx + 8
-        if search_start < len(body) {
-            for search_start < len(body) && (body[search_start] == ':' || body[search_start] == ' ' || body[search_start] == '\t') {
-                search_start += 1
-            }
-            if search_start < len(body) && body[search_start] == '"' {
-                search_start += 1
-                end := search_start
-                for end < len(body) && body[end] != '"' {
-                    if body[end] == '\\' && end + 1 < len(body) {
-                        end += 2
-                    } else {
-                        end += 1
-                    }
-                }
-                if end > search_start {
-                    msg.content = body[search_start:end]
-                }
+
+    // Anthropic returns content as array: "content":[{"type":"text","text":"..."}]
+    // Find "text":" pattern to extract the text value
+    text_key := `"text":"`
+    if idx := strings.index(body, text_key); idx >= 0 {
+        start := idx + len(text_key)
+        end := start
+        for end < len(body) && body[end] != '"' {
+            if body[end] == '\\' && end + 1 < len(body) {
+                end += 2
+            } else {
+                end += 1
             }
         }
+        if end > start {
+            msg.content = strings.clone(body[start:end])
+        }
     }
-    
+
     // Check for tool use
-    if strings.contains(body, `"type":"tool_use"`) || strings.contains(body, `"type":"tool_use"`) {
+    if strings.contains(body, `"type":"tool_use"`) {
         tool_calls = make([]ToolCall, 1)
         tool_calls[0] = ToolCall{
             id = "call_1",
@@ -376,7 +399,7 @@ parse_anthropic_response :: proc(body: string) -> (Message, []ToolCall, AgentErr
         }
         tool_calls[0].arguments["command"] = json.String("echo from anthropic")
     }
-    
+
     return msg, tool_calls, .None
 }
 
@@ -451,15 +474,15 @@ build_ollama_request :: proc(messages: []Message, model: string) -> string {
     }
     
     strings.write_string(&sb, `],"stream":false}`)
-    return strings.to_string(sb)
+    return strings.clone(strings.to_string(sb))
 }
 
 parse_ollama_response :: proc(body: string) -> (Message, []ToolCall, AgentError) {
     msg := Message{role = "assistant"}
     tool_calls := make([]ToolCall, 0)
-    
+
     if content_idx := strings.index(body, `"content"`); content_idx >= 0 {
-        search_start := content_idx + 8
+        search_start := content_idx + 9 // len(`"content"`) = 9
         for search_start < len(body) && (body[search_start] == ':' || body[search_start] == ' ' || body[search_start] == '\t') {
             search_start += 1
         }
@@ -467,14 +490,18 @@ parse_ollama_response :: proc(body: string) -> (Message, []ToolCall, AgentError)
             search_start += 1
             end := search_start
             for end < len(body) && body[end] != '"' {
-                end += 1
+                if body[end] == '\\' && end + 1 < len(body) {
+                    end += 2
+                } else {
+                    end += 1
+                }
             }
             if end > search_start {
-                msg.content = body[search_start:end]
+                msg.content = strings.clone(body[search_start:end])
             }
         }
     }
-    
+
     return msg, tool_calls, .None
 }
 
@@ -721,15 +748,16 @@ compatible_deinit :: proc(ptr: rawptr) {
 
 compatible_chat :: proc(ptr: rawptr, messages: []Message, tools: []Tool) -> (Message, []ToolCall, AgentError) {
     prov := (^CompatibleProvider)(ptr)
-    
+
     request_body := build_openai_request(messages, tools, prov.model)
     defer delete(request_body)
-    
+
     response_body, err := http_post(prov.endpoint, request_body, prov.api_key)
     if err != .None {
         return Message{}, {}, .ProviderError
     }
-    
+    defer delete(response_body)
+
     return parse_openai_response(response_body)
 }
 

@@ -1,0 +1,36 @@
+# fly.toml app configuration file generated for odin-claw on 2026-02-19T19:19:05-06:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'odin-claw'
+primary_region = 'ord'
+
+[build]
+
+[env]
+  ODINCLAW_GATEWAY_HOST = "0.0.0.0"
+  ODINCLAW_GATEWAY_PORT = "8080"
+  ODINCLAW_DEFAULT_PROVIDER = "xai"
+  ODINCLAW_DEFAULT_MODEL = "grok-code-fast-1"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[http_service.checks]]
+  interval = "10s"
+  timeout = "2s"
+  grace_period = "5s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  memory = '256mb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 256

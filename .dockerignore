@@ -1,0 +1,7 @@
+.git
+*.o
+odin-claw
+specs
+AGENTS.md
+README.md
+.taskmaster

@@ -489,7 +489,7 @@ run_service :: proc(args: []string) {
 
 load_or_default_config :: proc() -> Config {
     config_path := "~/.odin-claw/config.json"
-    env_path := os.get_env("NULLCLAW_CONFIG_PATH")
+    env_path := os.get_env("ODINCLAW_CONFIG_PATH")
     if env_path != "" {
         config_path = env_path
     }
