@@ -1,4 +1,4 @@
-# Implementation Plan - NullClaw Odin Port
+# Implementation Plan - OdinClaw
 
 ## Status: Complete
 

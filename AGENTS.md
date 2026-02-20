@@ -1,4 +1,4 @@
-# NullClaw Odin Port - Operational Guide
+# OdinClaw - Operational Guide
 
 ## Build & Run
 
@@ -7,7 +7,7 @@
 cc -c src/curl_helpers.c -o src/curl_helpers.o
 
 # Build
-odin build src -out:nullclaw
+odin build src -out:odin-claw
 
 # Test
 odin test src/ -all-packages
@@ -20,26 +20,26 @@ odinfmt -w src/
 
 ```bash
 # Interactive agent (uses configured provider)
-./nullclaw agent
+./odin-claw agent
 
 # Single message
-./nullclaw agent -m "Hello"
+./odin-claw agent -m "Hello"
 
 # Override provider/model
-./nullclaw agent --provider ollama --model llama3.2 -m "Hello"
+./odin-claw agent --provider ollama --model llama3.2 -m "Hello"
 
 # Start gateway HTTP server
-./nullclaw gateway
-./nullclaw gateway --port 9090 --host 0.0.0.0
+./odin-claw gateway
+./odin-claw gateway --port 9090 --host 0.0.0.0
 
 # List channels
-./nullclaw channel list
+./odin-claw channel list
 
 # Start channel loop (CLI or Telegram depending on config)
-./nullclaw channel start
+./odin-claw channel start
 
 # Help
-./nullclaw help
+./odin-claw help
 ```
 
 ## Environment Variables
@@ -55,7 +55,7 @@ odinfmt -w src/
 | `NULLCLAW_TELEGRAM_API_KEY` | Telegram bot token |
 | `NULLCLAW_SLACK_WEBHOOK_URL` | Slack webhook URL |
 | `NULLCLAW_DISCORD_TOKEN` | Discord bot token |
-| `NULLCLAW_CONFIG_PATH` | Config file path (default: ~/.nullclaw/config.json) |
+| `NULLCLAW_CONFIG_PATH` | Config file path (default: ~/.odin-claw/config.json) |
 
 ## Architecture
 

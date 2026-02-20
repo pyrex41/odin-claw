@@ -1,6 +1,6 @@
-# NullClaw
+# OdinClaw
 
-AI assistant runtime written in Odin, inspired by the Zig implementation.
+AI assistant runtime written in Odin, inspired by NullClaw (Zig).
 
 ## Features
 
@@ -18,12 +18,12 @@ AI assistant runtime written in Odin, inspired by the Zig implementation.
 cc -c src/curl_helpers.c -o src/curl_helpers.o
 
 # Build
-odin build src -out:nullclaw
+odin build src -out:odin-claw
 ```
 
 ## Configuration
 
-Create `~/.nullclaw/config.json`:
+Create `~/.odin-claw/config.json`:
 
 ```json
 {
@@ -51,14 +51,14 @@ Or use environment variables:
 
 | Command | Description |
 |---------|-------------|
-| `nullclaw agent` | Start the AI agent loop |
-| `nullclaw gateway` | Start HTTP gateway server |
-| `nullclaw channel` | Manage messaging channels |
-| `nullclaw status` | Show system status |
-| `nullclaw doctor` | Run diagnostics |
-| `nullclaw onboard` | Initial setup wizard |
-| `nullclaw models` | List available models |
-| `nullclaw help` | Show help |
+| `odin-claw agent` | Start the AI agent loop |
+| `odin-claw gateway` | Start HTTP gateway server |
+| `odin-claw channel` | Manage messaging channels |
+| `odin-claw status` | Show system status |
+| `odin-claw doctor` | Run diagnostics |
+| `odin-claw onboard` | Initial setup wizard |
+| `odin-claw models` | List available models |
+| `odin-claw help` | Show help |
 
 ## Providers
 
