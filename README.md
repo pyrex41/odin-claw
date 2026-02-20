@@ -1,5 +1,7 @@
 # OdinClaw
 
+Small enough to run on your coffee maker.
+
 AI assistant runtime written in Odin, inspired by NullClaw (Zig).
 
 ## Features
