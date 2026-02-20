@@ -23,6 +23,7 @@ Memory :: struct {
 Memory_VTable :: struct {
     store: proc(ptr: rawptr, key: string, data: []byte) -> Memory_Error,
     retrieve: proc(ptr: rawptr, key: string) -> ([]byte, Memory_Error),
+    delete_key: proc(ptr: rawptr, key: string) -> Memory_Error,
     search: proc(ptr: rawptr, query: string) -> []string,
 }
 
@@ -35,6 +36,7 @@ InMemoryMemory :: struct {
 in_memory_vtable := Memory_VTable{
     store = in_memory_store,
     retrieve = in_memory_retrieve,
+    delete_key = in_memory_delete,
     search = in_memory_search,
 }
 
@@ -72,6 +74,16 @@ in_memory_retrieve :: proc(ptr: rawptr, key: string) -> ([]byte, Memory_Error) {
         return cloned, .None
     }
     return nil, .Key_Not_Found
+}
+
+in_memory_delete :: proc(ptr: rawptr, key: string) -> Memory_Error {
+    mem := (^InMemoryMemory)(ptr)
+    if data, ok := mem.data[key]; ok {
+        delete(data, mem.allocator)
+        delete_key(&mem.data, key)
+        return .None
+    }
+    return .Key_Not_Found
 }
 
 in_memory_search :: proc(ptr: rawptr, query: string) -> []string {

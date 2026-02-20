@@ -1,8 +1,18 @@
+#+feature dynamic-literals
+
 package main
+
+import "core:testing"
 
 import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
+import "core:strconv"
+
+PROVIDER_ERROR_NONE :: 0
+PROVIDER_ERROR_NETWORK :: 1
+PROVIDER_ERROR_PARSE :: 2
+PROVIDER_ERROR_API :: 3
 
 Provider_Error :: enum {
     None,
@@ -122,10 +132,18 @@ escape_json_string :: proc(s: string) -> string {
 }
 
 http_post :: proc(url: string, body: string, api_key: string) -> (string, Provider_Error) {
-    // For now, return a placeholder - full HTTP implementation needs
-    // proper TLS and socket handling which is complex in Odin
-    // This allows the code to compile and work with mock provider
-    return `{"content":"API integration requires TLS support","choices":[]}`, .None
+    headers := []string{
+        fmt.tprintf("Authorization: Bearer %s", api_key),
+        "Content-Type: application/json",
+    }
+    resp, err := http_post_request(url, body, headers)
+    if err != .None {
+        return "", .Network_Error
+    }
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        return "", .API_Error
+    }
+    return resp.body, .None
 }
 
 fast_atoi :: proc(s: string) -> int {
@@ -518,4 +536,222 @@ mock_name :: proc(ptr: rawptr) -> string {
 // mock_deinit deinitializes
 mock_deinit :: proc(ptr: rawptr) {
     free(ptr)
+}
+
+// ============================================================================
+// OpenAI-Compatible Provider (handles 30+ providers: Groq, DeepSeek, LM Studio, etc.)
+// ============================================================================
+
+CompatibleProvider :: struct {
+    api_key:  string,
+    model:    string,
+    endpoint: string,
+}
+
+// Known compatible provider endpoints
+COMPATIBLE_ENDPOINTS := map[string]string{
+    "groq" = "https://api.groq.com/openai",
+    "deepseek" = "https://api.deepseek.com",
+    "opencode" = "https://api.opencode.ai",
+    "opencode-zen" = "https://api.opencode.ai",
+    "zen" = "https://api.opencode.ai",
+    "vercel" = "https://api.vercel.ai",
+    "vercel-ai" = "https://api.vercel.ai",
+    "cloudflare" = "https://gateway.ai.cloudflare.com/v1/account/gateway",
+    "cloudflare-ai" = "https://gateway.ai.cloudflare.com/v1/account/gateway",
+    "moonshot" = "https://api.moonshot.cn/v1",
+    "kimi" = "https://api.moonshot.cn/v1",
+    "synthetic" = "https://api.synthetic.com/v1",
+    "zai" = "https://api.z.ai/v1",
+    "z.ai" = "https://api.z.ai/v1",
+    "glm" = "https://open.bigmodel.cn/api/paas/v4",
+    "zhipu" = "https://open.bigmodel.cn/api/paas/v4",
+    "minimax" = "https://api.minimax.chat/v1",
+    "bedrock" = "https://bedrock-runtime.us-east-1.amazonaws.com",
+    "aws-bedrock" = "https://bedrock-runtime.us-east-1.amazonaws.com",
+    "qianfan" = "https://qianfan.baidubce.com/v2",
+    "baidu" = "https://qianfan.baidubce.com/v2",
+    "qwen" = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "dashscope" = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "qwen-intl" = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "dashscope-intl" = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "qwen-us" = "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+    "dashscope-us" = "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+    "mistral" = "https://api.mistral.ai/v1",
+    "together" = "https://api.together.ai/v1",
+    "together-ai" = "https://api.together.ai/v1",
+    "fireworks" = "https://api.fireworks.ai/v1",
+    "fireworks-ai" = "https://api.fireworks.ai/v1",
+    "perplexity" = "https://api.perplexity.ai",
+    "cohere" = "https://api.cohere.ai/v1",
+    "copilot" = "https://api.github.com/v1",
+    "github-copilot" = "https://api.github.com/v1",
+    "lmstudio" = "http://localhost:1234/v1",
+    "lm-studio" = "http://localhost:1234/v1",
+    "nvidia" = "https://integrate.api.nvidia.com/v1",
+    "nvidia-nim" = "https://integrate.api.nvidia.com/v1",
+    "build.nvidia.com" = "https://integrate.api.nvidia.com/v1",
+    "astrai" = "https://as-trai.com/v1",
+    "ollama" = "http://localhost:11434/v1",
+    "venice" = "https://api.venice.ai",
+    "x.ai" = "https://api.x.ai/v1",
+}
+
+get_compatible_endpoint :: proc(provider_name: string) -> string {
+    if ep, ok := COMPATIBLE_ENDPOINTS[provider_name]; ok {
+        return ep
+    }
+    // Check for custom: prefix
+    if strings.has_prefix(provider_name, "custom:") {
+        return strings.trim_left(provider_name, "custom:")
+    }
+    return ""
+}
+
+classify_provider_by_key :: proc(api_key: string) -> Provider_Type {
+    if len(api_key) == 0 {
+        return .Unknown
+    }
+    // gsk_ = Groq
+    if strings.has_prefix(api_key, "gsk_") {
+        return .Compatible
+    }
+    // xai- = xAI
+    if strings.has_prefix(api_key, "xai-") {
+        return .Compatible
+    }
+    // pplx- = Perplexity
+    if strings.has_prefix(api_key, "pplx-") {
+        return .Compatible
+    }
+    // AKIA = AWS (Bedrock)
+    if strings.has_prefix(api_key, "AKIA") {
+        return .Compatible
+    }
+    // sk-ant- = Anthropic (but we have native)
+    // sk- = OpenAI or compatible
+    if strings.has_prefix(api_key, "sk-") {
+        return .OpenAI // Default to OpenAI, can override
+    }
+    return .Unknown
+}
+
+Provider_Type :: enum {
+    Unknown,
+    OpenAI,
+    Anthropic,
+    xAI,
+    Ollama,
+    Compatible,
+    Mock,
+}
+
+get_provider_type :: proc(name: string, api_key: string) -> Provider_Type {
+    lower := strings.to_lower(name)
+    
+    // Check by name first
+    switch lower {
+    case "openai":
+        return .OpenAI
+    case "anthropic", "claude":
+        return .Anthropic
+    case "xai", "grok":
+        return .xAI
+    case "ollama":
+        return .Ollama
+    case "mock":
+        return .Mock
+    case "compatible":
+        return .Compatible
+    }
+    
+    // Check if it's a known compatible provider
+    if get_compatible_endpoint(lower) != "" {
+        return .Compatible
+    }
+    
+    // Fall back to classifying by API key
+    return classify_provider_by_key(api_key)
+}
+
+// init_compatible_provider creates an OpenAI-compatible provider
+init_compatible_provider :: proc(api_key: string, model: string, provider_name: string) -> Provider {
+    prov := new(CompatibleProvider)
+    prov.api_key = api_key
+    prov.model = model
+    
+    // Use provided name or default to "compatible"
+    name := provider_name
+    if name == "" {
+        name = "compatible"
+    }
+    
+    endpoint := get_compatible_endpoint(strings.to_lower(name))
+    if endpoint == "" {
+        endpoint = "https://api.openai.com/v1" // Default fallback
+    }
+    prov.endpoint = endpoint
+    
+    return Provider{ptr = prov, vtable = &compatible_vtable}
+}
+
+compatible_vtable := Provider_VTable{
+    chat = compatible_chat,
+    name = compatible_name,
+    deinit = compatible_deinit,
+}
+
+compatible_name :: proc(ptr: rawptr) -> string {
+    prov := (^CompatibleProvider)(ptr)
+    return fmt.tprintf("compatible:%s", prov.model)
+}
+
+compatible_deinit :: proc(ptr: rawptr) {
+    free(ptr)
+}
+
+compatible_chat :: proc(ptr: rawptr, messages: []Message, tools: []Tool) -> (Message, []ToolCall, AgentError) {
+    prov := (^CompatibleProvider)(ptr)
+    
+    request_body := build_openai_request(messages, tools, prov.model)
+    defer delete(request_body)
+    
+    response_body, err := http_post(prov.endpoint, request_body, prov.api_key)
+    if err != .None {
+        return Message{}, {}, .ProviderError
+    }
+    
+    return parse_openai_response(response_body)
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+test_compatible_endpoint_detection :: proc(t: ^testing.T) {
+    testing.expect(t, get_compatible_endpoint("groq") == "https://api.groq.com/openai", "Groq endpoint")
+    testing.expect(t, get_compatible_endpoint("deepseek") == "https://api.deepseek.com", "DeepSeek endpoint")
+    testing.expect(t, get_compatible_endpoint("ollama") == "http://localhost:11434/v1", "Ollama endpoint")
+    testing.expect(t, get_compatible_endpoint("lmstudio") == "http://localhost:1234/v1", "LM Studio endpoint")
+    testing.expect(t, get_compatible_endpoint("zen") == "https://api.opencode.ai", "Zen endpoint")
+    testing.expect(t, get_compatible_endpoint("unknown") == "", "Unknown returns empty")
+}
+
+@test
+test_provider_type_detection :: proc(t: ^testing.T) {
+    testing.expect(t, get_provider_type("openai", "sk-test") == .OpenAI, "OpenAI by name")
+    testing.expect(t, get_provider_type("anthropic", "sk-ant-test") == .Anthropic, "Anthropic by name")
+    testing.expect(t, get_provider_type("ollama", "") == .Ollama, "Ollama by name")
+    testing.expect(t, get_provider_type("groq", "gsk_test") == .Compatible, "Groq by key prefix")
+    testing.expect(t, get_provider_type("deepseek", "sk-test") == .Compatible, "DeepSeek by endpoint")
+}
+
+@test
+test_classify_provider_by_key :: proc(t: ^testing.T) {
+    testing.expect(t, classify_provider_by_key("gsk_abc") == .Compatible, "gsk_ prefix = Compatible")
+    testing.expect(t, classify_provider_by_key("xai-abc") == .Compatible, "xai- prefix = Compatible")
+    testing.expect(t, classify_provider_by_key("pplx-abc") == .Compatible, "pplx- prefix = Compatible")
+    testing.expect(t, classify_provider_by_key("AKIAIOSFODNN7EXAMPLE") == .Compatible, "AWS key = Compatible")
+    testing.expect(t, classify_provider_by_key("sk-test") == .OpenAI, "sk- prefix = OpenAI")
 }

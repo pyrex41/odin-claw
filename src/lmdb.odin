@@ -1,5 +1,6 @@
 package main
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -241,13 +242,21 @@ lmdb_delete_key :: proc(ptr: rawptr, key: string) -> Memory_Error {
 
 // --- Migration helper ---
 
+Snapshot_Entry :: struct {
+    key:   string,
+    value: string,
+}
+
+Snapshot :: struct {
+    version: int,
+    entries: []Snapshot_Entry,
+}
+
 // migrate_snapshot_to_lmdb imports a JSON snapshot file into an LMDB memory store
 migrate_snapshot_to_lmdb :: proc(lmdb_mem: Memory, snapshot_path: string) -> bool {
     data, ok := os.read_entire_file(snapshot_path)
     if !ok { return false }
     defer delete(data)
-
-    import "core:encoding/json"
 
     snapshot: Snapshot
     err := json.unmarshal(data, &snapshot)

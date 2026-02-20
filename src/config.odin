@@ -84,14 +84,15 @@ ChannelsConfig :: struct {
 
 // ProvidersConfig holds configuration for AI model providers
 ProvidersConfig :: struct {
-    openai_api_key: string,
+    openai_api_key:   string,
     anthropic_api_key: string,
-    xai_api_key: string,
-    ollama_endpoint: string,
-    gemini_key: string,
+    xai_api_key:      string,
+    ollama_endpoint:  string,
+    gemini_key:       string,
+    compatible_key:   string, // For OpenAI-compatible providers (Groq, DeepSeek, etc.)
     default_provider: string,
-    default_model: string,
-    retry_attempts: int,
+    default_model:    string,
+    retry_attempts:   int,
     streaming_enabled: bool,
 }
 
