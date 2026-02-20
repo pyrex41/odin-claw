@@ -548,57 +548,66 @@ CompatibleProvider :: struct {
     endpoint: string,
 }
 
-// Known compatible provider endpoints
-COMPATIBLE_ENDPOINTS := map[string]string{
-    "groq" = "https://api.groq.com/openai",
-    "deepseek" = "https://api.deepseek.com",
-    "opencode" = "https://api.opencode.ai",
-    "opencode-zen" = "https://api.opencode.ai",
-    "zen" = "https://api.opencode.ai",
-    "vercel" = "https://api.vercel.ai",
-    "vercel-ai" = "https://api.vercel.ai",
-    "cloudflare" = "https://gateway.ai.cloudflare.com/v1/account/gateway",
-    "cloudflare-ai" = "https://gateway.ai.cloudflare.com/v1/account/gateway",
-    "moonshot" = "https://api.moonshot.cn/v1",
-    "kimi" = "https://api.moonshot.cn/v1",
-    "synthetic" = "https://api.synthetic.com/v1",
-    "zai" = "https://api.z.ai/v1",
-    "z.ai" = "https://api.z.ai/v1",
-    "glm" = "https://open.bigmodel.cn/api/paas/v4",
-    "zhipu" = "https://open.bigmodel.cn/api/paas/v4",
-    "minimax" = "https://api.minimax.chat/v1",
-    "bedrock" = "https://bedrock-runtime.us-east-1.amazonaws.com",
-    "aws-bedrock" = "https://bedrock-runtime.us-east-1.amazonaws.com",
-    "qianfan" = "https://qianfan.baidubce.com/v2",
-    "baidu" = "https://qianfan.baidubce.com/v2",
-    "qwen" = "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "dashscope" = "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "qwen-intl" = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    "dashscope-intl" = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    "qwen-us" = "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
-    "dashscope-us" = "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
-    "mistral" = "https://api.mistral.ai/v1",
-    "together" = "https://api.together.ai/v1",
-    "together-ai" = "https://api.together.ai/v1",
-    "fireworks" = "https://api.fireworks.ai/v1",
-    "fireworks-ai" = "https://api.fireworks.ai/v1",
-    "perplexity" = "https://api.perplexity.ai",
-    "cohere" = "https://api.cohere.ai/v1",
-    "copilot" = "https://api.github.com/v1",
-    "github-copilot" = "https://api.github.com/v1",
-    "lmstudio" = "http://localhost:1234/v1",
-    "lm-studio" = "http://localhost:1234/v1",
-    "nvidia" = "https://integrate.api.nvidia.com/v1",
-    "nvidia-nim" = "https://integrate.api.nvidia.com/v1",
-    "build.nvidia.com" = "https://integrate.api.nvidia.com/v1",
-    "astrai" = "https://as-trai.com/v1",
-    "ollama" = "http://localhost:11434/v1",
-    "venice" = "https://api.venice.ai",
-    "x.ai" = "https://api.x.ai/v1",
+// Lazy-initialized compatible provider endpoints
+@(private)
+compatible_endpoints_cache: map[string]string
+
+get_compatible_endpoints :: proc() -> ^map[string]string {
+    if len(compatible_endpoints_cache) == 0 {
+        compatible_endpoints_cache = map[string]string{
+            "groq" = "https://api.groq.com/openai",
+            "deepseek" = "https://api.deepseek.com",
+            "opencode" = "https://api.opencode.ai",
+            "opencode-zen" = "https://api.opencode.ai",
+            "zen" = "https://api.opencode.ai",
+            "vercel" = "https://api.vercel.ai",
+            "vercel-ai" = "https://api.vercel.ai",
+            "cloudflare" = "https://gateway.ai.cloudflare.com/v1/account/gateway",
+            "cloudflare-ai" = "https://gateway.ai.cloudflare.com/v1/account/gateway",
+            "moonshot" = "https://api.moonshot.cn/v1",
+            "kimi" = "https://api.moonshot.cn/v1",
+            "synthetic" = "https://api.synthetic.com/v1",
+            "zai" = "https://api.z.ai/v1",
+            "z.ai" = "https://api.z.ai/v1",
+            "glm" = "https://open.bigmodel.cn/api/paas/v4",
+            "zhipu" = "https://open.bigmodel.cn/api/paas/v4",
+            "minimax" = "https://api.minimax.chat/v1",
+            "bedrock" = "https://bedrock-runtime.us-east-1.amazonaws.com",
+            "aws-bedrock" = "https://bedrock-runtime.us-east-1.amazonaws.com",
+            "qianfan" = "https://qianfan.baidubce.com/v2",
+            "baidu" = "https://qianfan.baidubce.com/v2",
+            "qwen" = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "dashscope" = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "qwen-intl" = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            "dashscope-intl" = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            "qwen-us" = "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+            "dashscope-us" = "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+            "mistral" = "https://api.mistral.ai/v1",
+            "together" = "https://api.together.ai/v1",
+            "together-ai" = "https://api.together.ai/v1",
+            "fireworks" = "https://api.fireworks.ai/v1",
+            "fireworks-ai" = "https://api.fireworks.ai/v1",
+            "perplexity" = "https://api.perplexity.ai",
+            "cohere" = "https://api.cohere.ai/v1",
+            "copilot" = "https://api.github.com/v1",
+            "github-copilot" = "https://api.github.com/v1",
+            "lmstudio" = "http://localhost:1234/v1",
+            "lm-studio" = "http://localhost:1234/v1",
+            "nvidia" = "https://integrate.api.nvidia.com/v1",
+            "nvidia-nim" = "https://integrate.api.nvidia.com/v1",
+            "build.nvidia.com" = "https://integrate.api.nvidia.com/v1",
+            "astrai" = "https://as-trai.com/v1",
+            "ollama" = "http://localhost:11434/v1",
+            "venice" = "https://api.venice.ai",
+            "x.ai" = "https://api.x.ai/v1",
+        }
+    }
+    return &compatible_endpoints_cache
 }
 
 get_compatible_endpoint :: proc(provider_name: string) -> string {
-    if ep, ok := COMPATIBLE_ENDPOINTS[provider_name]; ok {
+    endpoints := get_compatible_endpoints()
+    if ep, ok := endpoints^[provider_name]; ok {
         return ep
     }
     // Check for custom: prefix

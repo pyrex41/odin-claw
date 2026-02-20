@@ -7,8 +7,7 @@
 cc -c src/curl_helpers.c -o src/curl_helpers.o
 
 # Build
-odin build src -out:odin-claw -o:size
-strip odin-claw
+odin build src -out:odin-claw -o:aggressive
 
 # Test
 odin test src/ -all-packages

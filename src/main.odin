@@ -2,7 +2,6 @@ package main
 
 import "core:fmt"
 import "core:os"
-import "core:testing"
 import "core:strings"
 
 Command :: enum {
@@ -672,7 +671,4 @@ main :: proc() {
     }
 }
 
-@test
-test_example :: proc(t: ^testing.T) {
-    testing.expect(t, true, "This test should pass")
-}
+

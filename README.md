@@ -17,9 +17,8 @@ AI assistant runtime written in Odin, inspired by NullClaw (Zig).
 # Compile C helper for libcurl (one-time)
 cc -c src/curl_helpers.c -o src/curl_helpers.o
 
-# Build (optimized for size)
-odin build src -out:odin-claw -o:size
-strip odin-claw  # Optional: strip debug symbols (~16KB smaller)
+# Build (optimized for speed)
+odin build src -out:odin-claw -o:aggressive
 ```
 
 ## Configuration
