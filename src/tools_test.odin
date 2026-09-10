@@ -136,7 +136,11 @@ test_git_tool :: proc(t: ^testing.T) {
 @test
 test_memory_store_tool :: proc(t: ^testing.T) {
     config := default_config()
-    tool := Tool{ptr = nil, vtable = &memory_store_tool_vtable}
+    mem := init_in_memory()
+    defer deinit_in_memory(mem)
+    mem_ctx := new(MemoryToolContext)
+    mem_ctx.mem = mem
+    tool := Tool{ptr = mem_ctx, vtable = &memory_store_tool_vtable}
     runtime := create_native_runtime()
     defer runtime.vtable.deinit(&runtime)
 
@@ -157,18 +161,31 @@ test_memory_store_tool :: proc(t: ^testing.T) {
 @test
 test_memory_recall_tool :: proc(t: ^testing.T) {
     config := default_config()
-    tool := Tool{ptr = nil, vtable = &memory_recall_tool_vtable}
+    mem := init_in_memory()
+    defer deinit_in_memory(mem)
+    mem_ctx := new(MemoryToolContext)
+    mem_ctx.mem = mem
+
+    store_tool := Tool{ptr = mem_ctx, vtable = &memory_store_tool_vtable}
+    recall_tool := Tool{ptr = mem_ctx, vtable = &memory_recall_tool_vtable}
     runtime := create_native_runtime()
     defer runtime.vtable.deinit(&runtime)
 
-    args := make(map[string]json.Value)
-    defer delete(args)
-    args["query"] = json.String("test query")
+    store_args := make(map[string]json.Value)
+    defer delete(store_args)
+    store_args["key"] = json.String("test_key")
+    store_args["value"] = json.String("test value content")
 
-    result := tool.vtable.execute(tool.ptr, args, &config, &runtime)
+    store_result := store_tool.vtable.execute(store_tool.ptr, store_args, &config, &runtime)
+
+    recall_args := make(map[string]json.Value)
+    defer delete(recall_args)
+    recall_args["query"] = json.String("test_key")
+
+    result := recall_tool.vtable.execute(recall_tool.ptr, recall_args, &config, &runtime)
     switch r in result {
     case string:
-        testing.expect(t, strings.contains(r, "test query"), "Should recall query")
+        testing.expect(t, strings.contains(r, "test value content"), "Should recall stored value")
     case Error:
         testing.expect(t, false, fmt.tprintf("Memory recall failed: %s", r.message))
     }

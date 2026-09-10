@@ -96,8 +96,25 @@ run_agent :: proc(args: []string) {
     config := load_or_default_config()
     defer free_config(&config)
 
-    tools := get_tools()
-    defer delete(tools)
+    mem_path := config.memory.db_path
+    if mem_path == "" { mem_path = "/tmp/odin-claw/memory" }
+    mem, mem_ok := init_lmdb_memory(mem_path)
+    use_lmdb := mem_ok
+    if !use_lmdb {
+        mem = init_in_memory()
+        fmt.println("[Agent] Using in-memory storage")
+    } else {
+        fmt.println("[Agent] Using LMDB storage")
+    }
+    tools := get_tools(mem)
+    defer {
+        delete(tools)
+        if use_lmdb {
+            deinit_lmdb_memory(mem)
+        } else {
+            deinit_in_memory(mem)
+        }
+    }
 
     runtime := create_native_runtime()
     defer runtime.vtable.deinit(&runtime)
@@ -162,7 +179,10 @@ run_gateway :: proc(args: []string) {
         }
     }
 
-    tools := get_tools()
+    mem := init_in_memory()
+    defer deinit_in_memory(mem)
+
+    tools := get_tools(mem)
     defer delete(tools)
 
     runtime := create_native_runtime()
@@ -170,9 +190,6 @@ run_gateway :: proc(args: []string) {
 
     provider := create_provider_from_config(&config)
     defer provider.vtable.deinit(provider.ptr)
-
-    mem := init_in_memory()
-    defer deinit_in_memory(mem)
 
     fmt.printf("Starting gateway on %s:%d\n", host, port)
     start_gateway(&config, host, port, provider, tools, mem)
@@ -655,7 +672,10 @@ start_channels :: proc(config: ^Config) {
 }
 
 run_cli_channel :: proc(config: ^Config) {
-    tools := get_tools()
+    mem := init_in_memory()
+    defer deinit_in_memory(mem)
+
+    tools := get_tools(mem)
     defer delete(tools)
 
     runtime := create_native_runtime()
@@ -663,9 +683,6 @@ run_cli_channel :: proc(config: ^Config) {
 
     provider := create_provider_from_config(config)
     defer provider.vtable.deinit(provider.ptr)
-
-    mem := init_in_memory()
-    defer deinit_in_memory(mem)
 
     agent := init_agent(config, provider, tools, runtime)
     defer deinit_agent(agent)

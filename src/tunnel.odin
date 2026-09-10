@@ -32,6 +32,7 @@ Tunnel :: struct {
 	public_url:  string,
 	running:     bool,
 	process_cmd: string,
+	subprocess:  ^SubProcess,
 }
 
 // ============================================================================
@@ -52,6 +53,10 @@ init_tunnel :: proc(config: Tunnel_Config) -> ^Tunnel {
 deinit_tunnel :: proc(t: ^Tunnel) {
 	if t == nil {
 		return
+	}
+	if t.running && t.subprocess != nil {
+		subprocess_kill(t.subprocess)
+		deinit_subprocess(t.subprocess)
 	}
 	if t.process_cmd != "" {
 		delete(t.process_cmd)
@@ -117,7 +122,6 @@ start_tunnel :: proc(t: ^Tunnel) -> bool {
 		return false
 	}
 
-	// Store the command on the tunnel
 	if t.process_cmd != "" {
 		delete(t.process_cmd)
 	}
@@ -127,16 +131,37 @@ start_tunnel :: proc(t: ^Tunnel) -> bool {
 	fmt.printf("[Tunnel] Starting %s tunnel on port %d\n", provider_name, t.config.local_port)
 	fmt.printf("[Tunnel] Command: %s\n", t.process_cmd)
 
-	// Placeholder: actual subprocess execution would happen here
+	sp, ok := spawn_process(t.process_cmd, {})
+	if !ok {
+		fmt.printf("[Tunnel] Failed to start subprocess\n")
+		return false
+	}
+
+	t.subprocess = sp
 	t.running = true
 
-	// Set a placeholder public URL based on provider
-	if t.public_url != "" {
-		delete(t.public_url)
+	for i := 0; i < 20; i += 1 {
+		line, line_ok := subprocess_read_line(sp)
+		if !line_ok { break }
+		if strings.contains(line, "https://") || strings.contains(line, "http://") {
+			if t.public_url != "" {
+				delete(t.public_url)
+			}
+			t.public_url = extract_url_from_line(line)
+			fmt.printf("[Tunnel] Public URL: %s\n", t.public_url)
+			break
+		}
 	}
-	t.public_url = format_tunnel_url(t)
 
-	fmt.printf("[Tunnel] Started successfully, public URL: %s\n", t.public_url)
+	if t.public_url == "" {
+		if t.public_url != "" {
+			delete(t.public_url)
+		}
+		t.public_url = format_tunnel_url(t)
+		fmt.printf("[Tunnel] Using placeholder URL: %s\n", t.public_url)
+	}
+
+	fmt.printf("[Tunnel] Started successfully\n")
 	return true
 }
 
@@ -150,7 +175,11 @@ stop_tunnel :: proc(t: ^Tunnel) {
 	provider_name := tunnel_provider_name(t.config.provider_type)
 	fmt.printf("[Tunnel] Stopping %s tunnel...\n", provider_name)
 
-	// Placeholder: actual process termination would happen here
+	if t.subprocess != nil {
+		subprocess_kill(t.subprocess)
+		deinit_subprocess(t.subprocess)
+		t.subprocess = nil
+	}
 	t.running = false
 
 	fmt.printf("[Tunnel] Stopped\n")
@@ -259,6 +288,36 @@ check_binary_exists :: proc(paths: []string) -> bool {
 		}
 	}
 	return false
+}
+
+extract_url_from_line :: proc(line: string) -> string {
+	https_idx := strings.index(line, "https://")
+	if https_idx >= 0 {
+		url_start := https_idx
+		for url_start > 0 && line[url_start - 1] != ' ' {
+			url_start -= 1
+		}
+		url_end := https_idx + 8
+		for url_end < len(line) && line[url_end] != ' ' && line[url_end] != '\n' && line[url_end] != '\r' {
+			url_end += 1
+		}
+		return strings.clone(line[url_start:url_end])
+	}
+
+	http_idx := strings.index(line, "http://")
+	if http_idx >= 0 {
+		url_start := http_idx
+		for url_start > 0 && line[url_start - 1] != ' ' {
+			url_start -= 1
+		}
+		url_end := http_idx + 7
+		for url_end < len(line) && line[url_end] != ' ' && line[url_end] != '\n' && line[url_end] != '\r' {
+			url_end += 1
+		}
+		return strings.clone(line[url_start:url_end])
+	}
+
+	return strings.clone("")
 }
 
 // tunnel_provider_name returns a human-readable name for a provider type

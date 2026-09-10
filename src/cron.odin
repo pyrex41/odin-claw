@@ -187,9 +187,12 @@ tick_scheduler :: proc(cs: ^CronScheduler) {
 }
 
 // execute_cron_job runs the command associated with a job.
-// Placeholder implementation -- logs the execution intent.
 execute_cron_job :: proc(job: ^CronJob) {
     fmt.printf("[Cron] Executing job: %s -> %s\n", job.name, job.command)
+    c_cmd := strings.clone_to_cstring(job.command)
+    defer delete(c_cmd)
+    exit_code := system(c_cmd)
+    fmt.printf("[Cron] Job '%s' exit code: %d\n", job.name, exit_code)
 }
 
 // ============================================================================

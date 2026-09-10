@@ -1,7 +1,7 @@
 # Build stage
 FROM alpine:3.19 AS builder
 
-RUN apk add --no-cache clang llvm16 curl-dev musl-dev tar
+RUN apk add --no-cache clang llvm16 curl-dev musl-dev tar lmdb-dev
 
 RUN wget -O /tmp/odin.tar.gz https://github.com/odin-lang/Odin/releases/download/dev-2026-02/odin-linux-amd64-dev-2026-02.tar.gz \
     && tar xzf /tmp/odin.tar.gz -C /opt \
@@ -18,7 +18,7 @@ RUN odin build src -out:odin-claw -o:speed
 
 # Runtime stage
 FROM alpine:3.19
-RUN apk add --no-cache libcurl ca-certificates
+RUN apk add --no-cache libcurl ca-certificates lmdb
 RUN mkdir -p /var/lib/nullclaw /tmp/nullclaw
 WORKDIR /app
 COPY --from=builder /build/odin-claw .

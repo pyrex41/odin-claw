@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:math/rand"
+import "core:net"
 import "core:strings"
 
 // WebSocket opcodes per RFC 6455 Section 5.2
@@ -24,6 +25,7 @@ WebSocket_Frame :: struct {
 WebSocket_Connection :: struct {
 	url:         string,
 	connected:   bool,
+	socket:      net.TCP_Socket,
 	on_message:  proc(data: string),
 	on_close:    proc(),
 	send_buffer: [dynamic]u8,
@@ -240,7 +242,7 @@ ws_decode_frame :: proc(data: []byte) -> (WebSocket_Frame, int, bool) {
 	return frame, total_needed, true
 }
 
-// ws_send_text encodes a masked text frame and appends it to the send buffer
+// ws_send_text encodes a masked text frame and sends it over the socket
 ws_send_text :: proc(ws: ^WebSocket_Connection, text: string) {
 	if !ws.connected {
 		fmt.printf("[WebSocket] Cannot send: not connected\n")
@@ -251,14 +253,10 @@ ws_send_text :: proc(ws: ^WebSocket_Connection, text: string) {
 	frame_data := ws_encode_frame(WS_OPCODE_TEXT, payload, true)
 	defer delete(frame_data)
 
-	for b in frame_data {
-		append(&ws.send_buffer, b)
-	}
-
-	fmt.printf("[WebSocket] Queued text frame (%d bytes payload)\n", len(text))
+	net.send_tcp(ws.socket, frame_data)
 }
 
-// ws_send_close encodes a close frame and appends it to the send buffer
+// ws_send_close encodes a close frame and sends it over the socket
 ws_send_close :: proc(ws: ^WebSocket_Connection) {
 	if !ws.connected {
 		return
@@ -268,14 +266,10 @@ ws_send_close :: proc(ws: ^WebSocket_Connection) {
 	frame_data := ws_encode_frame(WS_OPCODE_CLOSE, empty, true)
 	defer delete(frame_data)
 
-	for b in frame_data {
-		append(&ws.send_buffer, b)
-	}
-
-	fmt.printf("[WebSocket] Queued close frame\n")
+	net.send_tcp(ws.socket, frame_data)
 }
 
-// ws_send_ping encodes a ping frame and appends it to the send buffer
+// ws_send_ping encodes a ping frame and sends it over the socket
 ws_send_ping :: proc(ws: ^WebSocket_Connection) {
 	if !ws.connected {
 		return
@@ -285,31 +279,46 @@ ws_send_ping :: proc(ws: ^WebSocket_Connection) {
 	frame_data := ws_encode_frame(WS_OPCODE_PING, empty, true)
 	defer delete(frame_data)
 
-	for b in frame_data {
-		append(&ws.send_buffer, b)
-	}
-
-	fmt.printf("[WebSocket] Queued ping frame\n")
+	net.send_tcp(ws.socket, frame_data)
 }
 
-// ws_connect is a placeholder that simulates establishing a connection.
-// A real implementation would perform TCP connect + TLS + HTTP upgrade handshake.
+// ws_connect performs TCP connect + HTTP upgrade handshake
 ws_connect :: proc(ws: ^WebSocket_Connection) -> bool {
 	fmt.printf("[WebSocket] Connecting to %s ...\n", ws.url)
 
-	// Placeholder: log the handshake that would be sent
-	handshake := ws_build_handshake(ws.url, _extract_host(ws.url))
-	fmt.printf("[WebSocket] Handshake request:\n%s", handshake)
+	host := _extract_host(ws.url)
+	port := _extract_port(ws.url)
 
-	// In a real implementation we would:
-	// 1. Resolve DNS and open a TCP socket
-	// 2. Optionally perform a TLS handshake for wss://
-	// 3. Send the HTTP upgrade request
-	// 4. Validate the 101 Switching Protocols response
-	// 5. Begin framed communication
+	addr4 := net.IP4_Address{127, 0, 0, 1}
+	endpoint := net.Endpoint{address = addr4, port = port}
 
+	sock, err := net.dial_tcp(endpoint)
+	if err != nil {
+		fmt.printf("[WebSocket] TCP connect failed: %v\n", err)
+		return false
+	}
+
+	handshake := ws_build_handshake(ws.url, host)
+	net.send_tcp(sock, transmute([]u8)handshake)
+
+	buf: [4096]u8
+	n, recv_err := net.recv_tcp(sock, buf[:])
+	if recv_err != nil || n <= 0 {
+		fmt.printf("[WebSocket] Failed to receive handshake response\n")
+		net.close(sock)
+		return false
+	}
+
+	response := string(buf[:n])
+	if !strings.contains(response, "101") {
+		fmt.printf("[WebSocket] Handshake failed: %s\n", response[:min(100, len(response))])
+		net.close(sock)
+		return false
+	}
+
+	ws.socket = sock
 	ws.connected = true
-	fmt.printf("[WebSocket] Connected (placeholder)\n")
+	fmt.printf("[WebSocket] Connected to %s\n", ws.url)
 	return true
 }
 
@@ -321,12 +330,45 @@ ws_disconnect :: proc(ws: ^WebSocket_Connection) {
 
 	ws_send_close(ws)
 	ws.connected = false
+	net.close(ws.socket)
 
 	if ws.on_close != nil {
 		ws.on_close()
 	}
 
 	fmt.printf("[WebSocket] Disconnected from %s\n", ws.url)
+}
+
+ws_recv :: proc(ws: ^WebSocket_Connection) -> (string, bool) {
+	if !ws.connected {
+		return "", false
+	}
+
+	buf: [65536]u8
+	n, err := net.recv_tcp(ws.socket, buf[:])
+	if err != nil || n <= 0 {
+		return "", false
+	}
+
+	frame, _, ok := ws_decode_frame(buf[:n])
+	if !ok {
+		return "", false
+	}
+	defer delete(frame.payload)
+
+	if frame.opcode == WS_OPCODE_TEXT {
+		return strings.clone(string(frame.payload)), true
+	}
+	if frame.opcode == WS_OPCODE_PING {
+		pong := ws_encode_frame(WS_OPCODE_PONG, frame.payload, false)
+		defer delete(pong)
+		net.send_tcp(ws.socket, pong)
+	}
+	if frame.opcode == WS_OPCODE_CLOSE {
+		ws.connected = false
+		net.close(ws.socket)
+	}
+	return "", false
 }
 
 // _extract_host pulls the host portion from a ws:// or wss:// URL
@@ -344,4 +386,13 @@ _extract_host :: proc(url: string) -> string {
 		return after_scheme[:slash_idx]
 	}
 	return after_scheme
+}
+
+_extract_port :: proc(url: string) -> int {
+	host_str := _extract_host(url)
+	if colon := strings.last_index(host_str, ":"); colon >= 0 {
+		return fast_atoi(host_str[colon+1:])
+	}
+	if strings.has_prefix(url, "wss://") { return 443 }
+	return 80
 }

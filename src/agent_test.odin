@@ -83,7 +83,9 @@ test_chat_loop :: proc(t: ^testing.T) {
     config.agent.max_loop_iterations = 5
     mock_provider := init_mock_provider("mock response", "mock response")
 	defer mock_provider.vtable.deinit(mock_provider.ptr)
-    tools := get_tools()
+    mem := init_in_memory()
+    defer deinit_in_memory(mem)
+    tools := get_tools(mem)
     runtime := create_native_runtime()
 
     agent := init_agent(&config, mock_provider, tools, runtime)

@@ -5,6 +5,7 @@ import "core:os"
 import "core:strings"
 import "core:strconv"
 import "core:time"
+import "core:thread"
 
 foreign import libc "system:c"
 
@@ -26,6 +27,20 @@ Daemon :: struct {
 	running:         bool,
 	gateway_started: bool,
 	cron_started:    bool,
+}
+
+GatewayThreadCtx :: struct {
+	config:   ^Config,
+	host:     string,
+	port:     int,
+	provider: Provider,
+	tools:    []Tool,
+	mem:      Memory,
+}
+
+gateway_thread_proc :: proc(t: ^thread.Thread) {
+	ctx := (^GatewayThreadCtx)(t.data)
+	start_gateway(ctx.config, ctx.host, ctx.port, ctx.provider, ctx.tools, ctx.mem)
 }
 
 // init_daemon allocates and initializes a Daemon from the given config
@@ -146,26 +161,68 @@ daemon_main_loop :: proc(d: ^Daemon) {
 
 	fmt.printf("[daemon] Entering main loop\n")
 
+	config := load_or_default_config()
+	defer free_config(&config)
+
+	mem_path := config.memory.db_path
+	if mem_path == "" { mem_path = "/tmp/odin-claw/memory" }
+	mem, mem_ok := init_lmdb_memory(mem_path)
+	if !mem_ok {
+		mem = init_in_memory()
+		fmt.println("[daemon] Using in-memory storage")
+	} else {
+		fmt.println("[daemon] Using LMDB storage")
+	}
+	defer {
+		if mem_ok {
+			deinit_lmdb_memory(mem)
+		} else {
+			deinit_in_memory(mem)
+		}
+	}
+
+	tools := get_tools(mem)
+	defer delete(tools)
+
+	provider := create_provider_from_config(&config)
+	defer provider.vtable.deinit(provider.ptr)
+
+	gw_ctx := new(GatewayThreadCtx)
+	gw_ctx.config = &config
+	gw_ctx.host = config.gateway.host
+	gw_ctx.port = config.gateway.port
+	gw_ctx.provider = provider
+	gw_ctx.tools = tools
+	gw_ctx.mem = mem
+
+	gw_thread := thread.create(gateway_thread_proc)
+	gw_thread.data = gw_ctx
+	thread.start(gw_thread)
+	d.gateway_started = true
+	fmt.printf("[daemon] Gateway started in thread on %s:%d\n", config.gateway.host, config.gateway.port)
+
+	cs := init_cron_scheduler()
+	defer deinit_cron_scheduler(cs)
+	start_scheduler(cs)
+	d.cron_started = true
+	fmt.printf("[daemon] Cron scheduler started\n")
+
 	tick: u64 = 0
 	for d.running {
 		tick += 1
-		fmt.printf("[daemon] Heartbeat tick=%d\n", tick)
 
-		// Placeholder: start gateway subsystem on first tick
-		if !d.gateway_started {
-			fmt.printf("[daemon] Gateway subsystem ready (placeholder)\n")
-			d.gateway_started = true
+		tick_scheduler(cs)
+
+		if tick % 60 == 0 {
+			fmt.printf("[daemon] Heartbeat tick=%d\n", tick)
 		}
 
-		// Placeholder: start cron subsystem on first tick
-		if !d.cron_started {
-			fmt.printf("[daemon] Cron subsystem ready (placeholder)\n")
-			d.cron_started = true
-		}
-
-		// Sleep 60 seconds between heartbeats
-		time.sleep(60 * time.Second)
+		time.sleep(1 * time.Second)
 	}
+
+	stop_scheduler(cs)
+	thread.destroy(gw_thread)
+	free(gw_ctx)
 
 	fmt.printf("[daemon] Main loop exited\n")
 }

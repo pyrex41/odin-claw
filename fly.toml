@@ -7,6 +7,7 @@ app = 'odin-claw'
 primary_region = 'ord'
 
 [build]
+  dockerfile = "Dockerfile"
 
 [env]
   ODINCLAW_GATEWAY_HOST = "0.0.0.0"

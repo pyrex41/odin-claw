@@ -30,6 +30,10 @@ Tool :: struct {
     vtable: ^Tool_VTable,
 }
 
+MemoryToolContext :: struct {
+    mem: Memory,
+}
+
 // validate_path checks if the given path is allowed based on config
 validate_path :: proc(path: string, config: ^Config) -> bool {
     // Allow absolute paths within workspace
@@ -438,10 +442,12 @@ http_tool_description :: proc(ptr: rawptr) -> string {
 // Memory tools - Store, Recall, Forget
 // ============================================================================
 
-// These require access to a global memory instance - we'll use a placeholder
-// In production, this would be passed through the runtime context
-
 memory_store_tool_execute :: proc(ptr: rawptr, args: map[string]json.Value, config: ^Config, runtime: ^Runtime) -> Result {
+    ctx := (^MemoryToolContext)(ptr)
+    if ctx == nil {
+        return Error{"Memory backend not initialized"}
+    }
+
     key_val, ok := args["key"]
     if !ok {
         return Error{"Missing 'key' argument"}
@@ -460,9 +466,11 @@ memory_store_tool_execute :: proc(ptr: rawptr, args: map[string]json.Value, conf
         return Error{"'value' must be a string"}
     }
 
-    // In a full implementation, this would use the agent's memory
-    // For now, we return a placeholder indicating the tool is available
-    return fmt.tprintf("Memory store: key='%s', value='%s' (configure memory backend for persistence)", string(key), string(value))
+    err := ctx.mem.vtable.store(ctx.mem.ptr, string(key), transmute([]u8)string(value))
+    if err != .None {
+        return Error{"Failed to store in memory"}
+    }
+    return fmt.tprintf("Stored '%s'", string(key))
 }
 
 memory_store_tool_name :: proc(ptr: rawptr) -> string {
@@ -474,6 +482,11 @@ memory_store_tool_description :: proc(ptr: rawptr) -> string {
 }
 
 memory_recall_tool_execute :: proc(ptr: rawptr, args: map[string]json.Value, config: ^Config, runtime: ^Runtime) -> Result {
+    ctx := (^MemoryToolContext)(ptr)
+    if ctx == nil {
+        return Error{"Memory backend not initialized"}
+    }
+
     query_val, ok := args["query"]
     if !ok {
         return Error{"Missing 'query' argument"}
@@ -483,8 +496,26 @@ memory_recall_tool_execute :: proc(ptr: rawptr, args: map[string]json.Value, con
         return Error{"'query' must be a string"}
     }
 
-    // In a full implementation, this would search the memory
-    return fmt.tprintf("Memory recall for query: '%s' (configure memory backend for search)", string(query))
+    data, err := ctx.mem.vtable.retrieve(ctx.mem.ptr, string(query))
+    if err == .None {
+        defer delete(data)
+        return string(data)
+    }
+
+    results := ctx.mem.vtable.search(ctx.mem.ptr, string(query))
+    if len(results) == 0 {
+        return "No memories found for that query."
+    }
+
+    sb := strings.builder_make()
+    strings.write_string(&sb, "Found memories:\n")
+    for i := 0; i < min(len(results), 10); i += 1 {
+        strings.write_string(&sb, fmt.tprintf("- %s\n", results[i]))
+    }
+    if len(results) > 10 {
+        strings.write_string(&sb, fmt.tprintf("... and %d more\n", len(results) - 10))
+    }
+    return strings.to_string(sb)
 }
 
 memory_recall_tool_name :: proc(ptr: rawptr) -> string {
@@ -496,6 +527,11 @@ memory_recall_tool_description :: proc(ptr: rawptr) -> string {
 }
 
 memory_forget_tool_execute :: proc(ptr: rawptr, args: map[string]json.Value, config: ^Config, runtime: ^Runtime) -> Result {
+    ctx := (^MemoryToolContext)(ptr)
+    if ctx == nil {
+        return Error{"Memory backend not initialized"}
+    }
+
     key_val, ok := args["key"]
     if !ok {
         return Error{"Missing 'key' argument"}
@@ -505,8 +541,14 @@ memory_forget_tool_execute :: proc(ptr: rawptr, args: map[string]json.Value, con
         return Error{"'key' must be a string"}
     }
 
-    // In a full implementation, this would delete from memory
-    return fmt.tprintf("Memory forget: key='%s' (configure memory backend for deletion)", string(key))
+    err := ctx.mem.vtable.delete_key(ctx.mem.ptr, string(key))
+    if err == .Key_Not_Found {
+        return Error{"Key not found in memory"}
+    }
+    if err != .None {
+        return Error{"Failed to delete from memory"}
+    }
+    return fmt.tprintf("Deleted '%s' from memory", string(key))
 }
 
 memory_forget_tool_name :: proc(ptr: rawptr) -> string {
@@ -1040,7 +1082,10 @@ web_search_tool_vtable := Tool_VTable{
 // get_tools - Returns all 12 available tools
 // ============================================================================
 
-get_tools :: proc() -> []Tool {
+get_tools :: proc(mem: Memory) -> []Tool {
+    mem_ctx := new(MemoryToolContext)
+    mem_ctx.mem = mem
+
     tools := make([]Tool, 12)
     tools[0] = Tool{ptr = nil, vtable = &shell_tool_vtable}
     tools[1] = Tool{ptr = nil, vtable = &file_read_tool_vtable}
@@ -1049,9 +1094,9 @@ get_tools :: proc() -> []Tool {
     tools[4] = Tool{ptr = nil, vtable = &file_append_tool_vtable}
     tools[5] = Tool{ptr = nil, vtable = &git_tool_vtable}
     tools[6] = Tool{ptr = nil, vtable = &http_tool_vtable}
-    tools[7] = Tool{ptr = nil, vtable = &memory_store_tool_vtable}
-    tools[8] = Tool{ptr = nil, vtable = &memory_recall_tool_vtable}
-    tools[9] = Tool{ptr = nil, vtable = &memory_forget_tool_vtable}
+    tools[7] = Tool{ptr = mem_ctx, vtable = &memory_store_tool_vtable}
+    tools[8] = Tool{ptr = mem_ctx, vtable = &memory_recall_tool_vtable}
+    tools[9] = Tool{ptr = mem_ctx, vtable = &memory_forget_tool_vtable}
     tools[10] = Tool{ptr = nil, vtable = &web_fetch_tool_vtable}
     tools[11] = Tool{ptr = nil, vtable = &web_search_tool_vtable}
     return tools

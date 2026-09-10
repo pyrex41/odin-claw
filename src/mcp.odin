@@ -27,11 +27,12 @@ MCP_Tool :: struct {
 // MCP_Server represents a connection to an MCP server
 MCP_Server :: struct {
     name:       string,
-    command:    string,   // Command to launch the server (e.g., "npx @modelcontextprotocol/server-filesystem")
+    command:    string,
     args:       []string,
     tools:      [dynamic]MCP_Tool,
     connected:  bool,
     request_id: int,
+    process:    ^SubProcess,
 }
 
 // MCP_Client manages multiple MCP server connections
@@ -54,6 +55,7 @@ deinit_mcp_client :: proc(c: ^MCP_Client) {
 }
 
 deinit_mcp_server :: proc(server: ^MCP_Server) {
+    disconnect_mcp_server(server)
     delete(server.name)
     delete(server.command)
     for &tool in server.tools {
@@ -99,6 +101,81 @@ build_tools_list_request :: proc(id: int) -> string {
 build_tool_call_request :: proc(tool_name: string, arguments: string, id: int) -> string {
     params := fmt.tprintf(`{"name":"%s","arguments":%s}`, tool_name, arguments)
     return build_jsonrpc_request("tools/call", params, id)
+}
+
+connect_mcp_server :: proc(server: ^MCP_Server) -> MCP_Error {
+    sp, ok := spawn_process(server.command, server.args)
+    if !ok {
+        fmt.printf("[MCP] Failed to start server '%s'\n", server.name)
+        return .Connection_Failed
+    }
+    server.process = sp
+
+    server.request_id += 1
+    init_req := build_initialize_request(server.request_id)
+    subprocess_write(sp, init_req)
+    subprocess_write(sp, "\n")
+
+    response, resp_ok := subprocess_read_line(sp)
+    if !resp_ok {
+        fmt.printf("[MCP] Failed to read initialize response from '%s'\n", server.name)
+        subprocess_kill(sp)
+        return .Connection_Failed
+    }
+
+    if strings.contains(response, `"error"`) {
+        fmt.printf("[MCP] Initialize error from '%s': %s\n", server.name, response)
+        subprocess_kill(sp)
+        return .Connection_Failed
+    }
+
+    subprocess_write(sp, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+    subprocess_write(sp, "\n")
+
+    server.request_id += 1
+    tools_req := build_tools_list_request(server.request_id)
+    subprocess_write(sp, tools_req)
+    subprocess_write(sp, "\n")
+
+    tools_response, tools_ok := subprocess_read_line(sp)
+    if !tools_ok {
+        fmt.printf("[MCP] Failed to read tools response from '%s'\n", server.name)
+        subprocess_kill(sp)
+        return .Connection_Failed
+    }
+
+    server.tools = parse_mcp_tools(tools_response)
+    server.connected = true
+
+    fmt.printf("[MCP] Connected to '%s', discovered %d tools\n", server.name, len(server.tools))
+    return .None
+}
+
+call_mcp_tool :: proc(server: ^MCP_Server, tool_name: string, arguments: string) -> (string, MCP_Error) {
+    if !server.connected || server.process == nil {
+        return "", .Connection_Failed
+    }
+
+    server.request_id += 1
+    req := build_tool_call_request(tool_name, arguments, server.request_id)
+    subprocess_write(server.process, req)
+    subprocess_write(server.process, "\n")
+
+    response, ok := subprocess_read_line(server.process)
+    if !ok {
+        return "", .Timeout
+    }
+
+    return parse_mcp_tool_result(response)
+}
+
+disconnect_mcp_server :: proc(server: ^MCP_Server) {
+    if server.process != nil {
+        subprocess_kill(server.process)
+        deinit_subprocess(server.process)
+        server.process = nil
+    }
+    server.connected = false
 }
 
 // parse_tools_from_response extracts tool definitions from a tools/list response
